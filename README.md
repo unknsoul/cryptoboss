@@ -340,3 +340,5 @@ If this project helps you, please give it a star! ⭐
 **Made with ❤️ for the crypto trading community**
 
 [⬆ Back to top](#-advanced-crypto-trading-bot---production-ready)
+#   c r y p t o b o s s  
+ 
