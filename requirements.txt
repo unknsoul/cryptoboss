@@ -1,0 +1,46 @@
+# Trading Bot Requirements
+# Professional Production-Grade Trading System
+
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+ccxt>=4.0.0
+websocket-client>=1.6.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+joblib>=1.3.0
+
+# Configuration & Validation
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# API & Web
+requests>=2.31.0
+google-generativeai>=0.3.0
+
+# Dashboard
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+
+# Monitoring & Logging
+prometheus-client>=0.18.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Data Storage (optional)
+psycopg2-binary>=2.9.0  # PostgreSQL
+redis>=5.0.0  # Caching
+
+# Development
+black>=23.0.0  # Code formatting
+flake8>=6.1.0  # Linting
+mypy>=1.5.0   # Type checking

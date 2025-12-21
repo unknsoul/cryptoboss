@@ -1,0 +1,6 @@
+Strategy,Type,Total Return,Annual Return,Sharpe,Sortino,Max DD,Trades,Win Rate,Profit Factor
+Mean Reversion,mean_reversion,-99.24%,-100.00%,2.41,3.96,99.53%,23,13.04%,0.23
+Bollinger Breakout,breakout,0.00%,0.00%,0.00,0.00,0.00%,0,0.00%,0.00
+Scalping,scalping,-52.78%,-98.93%,1.02,0.67,85.37%,114,50.88%,0.91
+Enhanced Momentum,momentum,-100.00%,-100.00%,-17.57,-10.61,100.00%,119,10.08%,0.01
+Professional Trend,trend_following,-43.18%,-96.72%,-1.24,-0.52,47.57%,20,35.00%,0.27

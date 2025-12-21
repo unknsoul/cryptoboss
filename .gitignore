@@ -1,0 +1,100 @@
+# .gitignore for Professional Trading Bot
+
+# Environment and Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs and Data
+logs/
+*.log
+data/*.csv
+data/*.json
+!data/.gitkeep
+
+# Models and Checkpoints
+models/*.pkl
+models/*.h5
+models/*.pt
+!models/.gitkeep
+
+# Charts and Results
+*.png
+*.jpg
+*.pdf
+!docs/images/*.png
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~.nib
+Thumbs.db
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Trading specific
+/trades/
+/backtest_results/
+/live_logs/
