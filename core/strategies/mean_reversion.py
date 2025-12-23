@@ -61,8 +61,8 @@ class MeanReversionStrategy(BaseStrategy):
         current_bb_middle = bb_middle[-1]
         current_percent_b = percent_b[-1]
         
-        # LONG signal - Oversold conditions
-        if current_percent_b < 0.2 and current_rsi < self.rsi_oversold:
+        # LONG signal - Oversold conditions (relaxed thresholds)
+        if current_percent_b < 0.25 and current_rsi < self.rsi_oversold + 5:
             stop_distance = current_price - current_bb_lower
             
             return {
@@ -78,8 +78,8 @@ class MeanReversionStrategy(BaseStrategy):
                 }
             }
         
-        # SHORT signal - Overbought conditions
-        if current_percent_b > 0.8 and current_rsi > self.rsi_overbought:
+        # SHORT signal - Overbought conditions (relaxed thresholds)
+        if current_percent_b > 0.75 and current_rsi > self.rsi_overbought - 5:
             stop_distance = current_bb_upper - current_price
             
             return {

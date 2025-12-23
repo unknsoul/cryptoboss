@@ -4,7 +4,7 @@ Splits large orders across time to reduce market impact
 """
 
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime, timedelta
 import threading
 from core.monitoring.logger import get_logger

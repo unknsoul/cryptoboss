@@ -1,0 +1,11 @@
+
+--- Testing Signal Generation ---
+Active Strategies: ['momentum', 'mean_reversion', 'vol_targeting', 'stat_arb', 'quality_momentum', 'microstructure']
+
+--- Result ---
+Signal Generated: {'action': 'SHORT', 'confidence': 0.8600000000000001, 'reasons': ['Technical bearish (100%)', 'HIGH confidence SELL: 86.0% >= 65.0%'], 'price': 55075.39603585333, 'atr': 201.13906449329298, 'timestamp': '2025-12-22T23:07:20.461333'}
+
+--- Testing Execution ---
+Trade Executed: True
+Positions: 0
+Current Position State: None

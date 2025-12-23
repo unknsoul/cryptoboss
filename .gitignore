@@ -5,6 +5,12 @@
 *.env
 !.env.example
 
+# Security - CRITICAL
+.keyfile             # Encryption key
+*.key                # Any key files
+*.pem                # Certificate files
+secrets/             # Secrets directory
+
 # Python
 __pycache__/
 *.py[cod]

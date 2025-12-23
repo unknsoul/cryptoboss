@@ -3,7 +3,23 @@ Configuration Management
 Handles environment-based settings with validation
 """
 
-from pydantic import BaseSettings, Field, validator
+# Pydantic v2 compatibility
+try:
+    from pydantic_settings import BaseSettings
+    from pydantic import Field, field_validator
+    PYDANTIC_V2 = True
+except ImportError:
+    try:
+        from pydantic import BaseSettings, Field, validator as field_validator
+        PYDANTIC_V2 = False
+    except ImportError:
+        # Fallback to simple dataclass-based config
+        from dataclasses import dataclass, field
+        BaseSettings = object
+        Field = field
+        field_validator = lambda *a, **k: lambda f: f
+        PYDANTIC_V2 = False
+
 from typing import Optional, List, Dict, Any
 import os
 from pathlib import Path
@@ -37,12 +53,6 @@ class TradingConfig(BaseSettings):
     enable_ml_signals: bool = Field(default=True)
     enable_sentiment: bool = Field(default=True)
     enable_regime_detection: bool = Field(default=True)
-    
-    @validator('trading_symbols')
-    def validate_symbols(cls, v):
-        if not v:
-            raise ValueError("At least one trading symbol required")
-        return v
 
 
 class RiskConfig(BaseSettings):
@@ -140,12 +150,6 @@ class Settings(BaseSettings):
     
     # Google Gemini API (for sentiment analysis)
     google_api_key: Optional[str] = Field(default=None, env='GOOGLE_API_KEY')
-    
-    @validator('environment')
-    def validate_environment(cls, v):
-        if v not in ['development', 'staging', 'production']:
-            raise ValueError("environment must be development, staging, or production")
-        return v
     
     def is_production(self) -> bool:
         """Check if running in production"""

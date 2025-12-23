@@ -108,10 +108,10 @@ class EnhancedMomentumStrategy(BaseStrategy):
             momentum_score += 0.15
         
         if volume_confirmed:
-            momentum_score += 0.0  # Bonus for volume
+            momentum_score += 0.1  # Bonus for volume confirmation
         
-        # Strong bullish momentum
-        if momentum_score >= 0.8 and current_histogram > 0:
+        # Strong bullish momentum (lowered threshold from 0.8 to 0.6)
+        if momentum_score >= 0.6 and current_histogram > 0:
             return {
                 'action': 'LONG',
                 'stop': current_atr * 2.5,
@@ -148,10 +148,10 @@ class EnhancedMomentumStrategy(BaseStrategy):
             momentum_score += 0.15
         
         if volume_confirmed:
-            momentum_score += 0.0
+            momentum_score += 0.1  # Bonus for volume confirmation
         
-        # Strong bearish momentum
-        if momentum_score >= 0.8 and current_histogram < 0:
+        # Strong bearish momentum (lowered threshold from 0.8 to 0.6)
+        if momentum_score >= 0.6 and current_histogram < 0:
             return {
                 'action': 'SHORT',
                 'stop': current_atr * 2.5,

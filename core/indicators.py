@@ -256,10 +256,35 @@ class TechnicalIndicators:
         Calculate Keltner Channels
         Returns: (upper_channel, middle_channel, lower_channel)
         """
-        atr_vals = TechnicalIndicators.atr(highs, lows, closes, period)
-        ema_vals = TechnicalIndicators.ema(closes, period)
+        if len(closes) < period:
+            return None, None, None
         
-        upper_channel = ema_vals + (multiplier * atr_vals)
-        lower_channel = ema_vals - (multiplier * atr_vals)
+        middle = TechnicalIndicators.ema(closes, period)
+        atr = TechnicalIndicators.atr(highs, lows, closes, period)
         
-        return upper_channel, ema_vals, lower_channel
+        if middle is None or atr is None:
+            return None, None, None
+        
+        upper = middle + (multiplier * atr)
+        lower = middle - (multiplier * atr)
+        
+        return upper, middle, lower
+    
+    @staticmethod
+    def volume_filter(volumes, period=20, threshold=0.8):
+        """
+        Check if current volume is above average (for filtering low-volume breakouts)
+        
+        Args:
+            volumes: Volume array
+            period: Lookback period for average
+            threshold: Multiplier of average (e.g., 0.8 = 80% of average)
+        
+        Returns:
+            True if current volume > average * threshold, False otherwise
+        """
+        if volumes is None or len(volumes) < period:
+            return False
+        
+        avg_volume = np.mean(volumes[-period:])
+        return volumes[-1] > avg_volume * threshold

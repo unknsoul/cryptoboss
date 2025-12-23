@@ -1,46 +1,98 @@
-# Trading Bot Requirements
-# Professional Production-Grade Trading System
+# Trading Bot Requirements - Updated 2025
+# Professional Production-Grade Trading System with Advanced Features
 
-# Core dependencies
-pandas>=2.0.0
-numpy>=1.24.0
-ccxt>=4.0.0
-websocket-client>=1.6.0
+# ==================== CORE DEPENDENCIES ====================
+# Updated to latest stable versions for performance and security
+
+# Exchange & Market Data
+ccxt>=4.4.0
+python-binance>=1.0.19
+websockets>=12.0
+websocket-client>=1.8.0
+
+# Data Processing & Analysis
+pandas>=2.2.0           # Latest stable pandas
+numpy>=1.26.0           # Performance improvements
+scipy>=1.12.0           # Scientific computing
+polars>=1.17.0          # High-performance DataFrame (10-100x faster)
+pyarrow>=18.1.0         # Columnar data format
 
 # Machine Learning
-scikit-learn>=1.3.0
-xgboost>=2.0.0
-joblib>=1.3.0
+scikit-learn>=1.4.0
+xgboost>=2.1.0          # Gradient boosting
+lightgbm>=4.5.0         # Fast gradient boosting  
+optuna>=4.1.0           # Hyperparameter optimization
 
-# Configuration & Validation
-pydantic>=2.0.0
+# Technical Analysis
+ta-lib>=0.4.24
+pandas-ta>=0.3.14b
+
+# ==================== PERFORMANCE ====================
+numba>=0.60.0           # JIT compilation (10-100x speedup)
+cython>=3.0.0           # C extensions for Python
+
+# ==================== CONFIGURATION & VALIDATION ====================
+pydantic>=2.10.0        # Data validation with V2 features
+pydantic-settings>=2.7.0
 python-dotenv>=1.0.0
+hydra-core>=1.3.0       # Advanced configuration management
+omegaconf>=2.3.0        # Configuration framework
 
-# API & Web
-requests>=2.31.0
-google-generativeai>=0.3.0
+# ==================== SECURITY ====================
+cryptography>=44.0.0    # API key encryption
+bcrypt>=4.2.1           # Password hashing
 
-# Dashboard
-streamlit>=1.28.0
-plotly>=5.17.0
+# ==================== API & WEB ====================
+requests>=2.32.0
+aiohttp>=3.11.0         # Async HTTP client
+google-generativeai>=0.8.0
 
-# Testing
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-asyncio>=0.21.0
+# ==================== DASHBOARD & VISUALIZATION ====================
+streamlit>=1.39.0
+plotly>=5.24.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+rich>=13.9.0            # Beautiful terminal output
 
-# Monitoring & Logging
-prometheus-client>=0.18.0
-
-# Visualization
-matplotlib>=3.7.0
-seaborn>=0.12.0
-
-# Data Storage (optional)
+# ==================== DATABASE & CACHING ====================
+sqlalchemy>=2.0.0       # Modern ORM
+alembic>=1.13.0         # Database migrations
 psycopg2-binary>=2.9.0  # PostgreSQL
-redis>=5.0.0  # Caching
+redis>=5.0.0            # Caching
+aioredis>=2.0.0         # Async Redis
 
-# Development
-black>=23.0.0  # Code formatting
-flake8>=6.1.0  # Linting
-mypy>=1.5.0   # Type checking
+# ==================== MONITORING & OBSERVABILITY ====================
+prometheus-client>=0.21.0
+opentelemetry-api>=1.28.0        # Distributed tracing
+opentelemetry-sdk>=1.28.0
+opentelemetry-instrumentation>=0.49b0
+structlog>=24.4.0                # Structured logging
+
+# ==================== TESTING ====================
+pytest>=8.3.0
+pytest-cov>=6.0.0
+pytest-asyncio>=0.24.0
+pytest-benchmark>=5.1.0  # Performance benchmarks
+hypothesis>=6.122.0      # Property-based testing
+
+# ==================== CODE QUALITY ====================
+black>=24.8.0           # Code formatting
+ruff>=0.8.0             # Fast linter (replaces flake8)
+mypy>=1.13.0            # Type checking
+pre-commit>=4.0.0       # Git hooks
+
+# ==================== UTILITIES ====================
+typing-extensions>=4.12.0
+python-dateutil>=2.9.0
+pytz>=2024.1
+tqdm>=4.67.0            # Progress bars
+
+# ==================== DEPENDENCY INJECTION ====================
+dependency-injector>=4.42.0
+
+# ==================== ML OPERATIONS ====================
+mlflow>=2.18.0          # Model versioning and tracking
+
+# ==================== ADVANCED FEATURES ====================
+fastapi>=0.115.0        # Modern API framework (optional)
+uvicorn>=0.32.0         # ASGI server (optional)
