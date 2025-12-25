@@ -1,463 +1,548 @@
 """
-Statistical Arbitrage Strategy
-Professional market-neutral strategy used by quant funds
-Works best in ranging markets with mean reversion
+Advanced Trading Strategies - Enterprise Features #82, #85, #88, #92
+Market Making, Grid Trading, DCA, and Momentum Scalping.
 """
 
-import numpy as np
-import pandas as pd
-from typing import Dict, Any, Optional
-from.base_strategy import BaseStrategy
+import logging
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
-class StatisticalArbitrageStrategy(BaseStrategy):
+class MarketMakingStrategy:
     """
-    Statistical Arbitrage (Pairs Trading / Mean Reversion)
+    Feature #82: Market Making Strategy
     
-    Concept:
-    - Identifies when price deviates from statistical mean
-    - Trades the reversion back to the mean
-    - Uses Z-score to measure deviation
-    - Multiple timeframe confirmation
-    
-    Best for: Ranging markets, low-to-medium volatility
-    Used by: Renaissance Technologies, Two Sigma, DE Shaw
+    Places bid/ask orders to capture spread.
     """
     
-    def __init__(self, lookback_period: int = 100,
-                entry_threshold: float = 2.0,
-                 exit_threshold: float = 0.5,
-                 use_bollinger: bool = True):
-        super().__init__("Statistical Arbitrage", "mean_reversion")
+    def __init__(
+        self,
+        spread_pct: float = 0.1,           # 0.1% spread
+        order_size_pct: float = 5.0,       # 5% of equity per side
+        max_inventory: float = 3.0,        # Max 3x base position
+        refresh_seconds: int = 30
+    ):
+        """
+        Initialize market making strategy.
         
-        self.lookback = lookback_period
-        self.entry_z = entry_threshold  # Enter when Z-score > 2.0
-        self.exit_z = exit_threshold    # Exit when Z-score < 0.5
-        self.use_bollinger = use_bollinger
+        Args:
+            spread_pct: Target spread percentage
+            order_size_pct: Order size as % of equity
+            max_inventory: Maximum inventory multiplier
+            refresh_seconds: Order refresh interval
+        """
+        self.spread_pct = spread_pct
+        self.order_size_pct = order_size_pct
+        self.max_inventory = max_inventory
+        self.refresh_seconds = refresh_seconds
         
-        self.parameters = {
-            'lookback_period': lookback_period,
-            'entry_threshold': entry_threshold,
-            'exit_threshold': exit_threshold
-        }
+        self.inventory = 0
+        self.realized_pnl = 0
+        self.trades = 0
+        self.active_orders: Dict[str, Dict] = {}
+        
+        logger.info(f"Market Making initialized - Spread: {spread_pct}%")
     
-    def signal(self, highs, lows, closes, volumes=None):
-        """Generate mean reversion signal"""
-        if not self.validate_data(highs, lows, closes):
-            return None
+    def generate_quotes(self, mid_price: float, equity: float) -> Dict:
+        """
+        Generate bid/ask quotes.
         
-        if len(closes) < self.lookback + 20:
-            return None
-        
-        # Calculate statistical measures
-        mean = np.mean(closes[-self.lookback:])
-        std = np.std(closes[-self.lookback:])
-        
-        if std == 0:
-            return None
-        
-        # Z-score (how many standard deviations from mean)
-        z_score = (closes[-1] - mean) / std
-        
-        # Bollinger Bands (2 std dev)
-        upper_band = mean + (2 * std)
-        lower_band = mean - (2 * std)
-        
-        # Mean Reversion Signal
-        action = 'HOLD'
-        confidence = 0.0
-        
-        # Oversold (price too low, expect reversion up)
-        if z_score < -self.entry_z:
-            action = 'LONG'
-            confidence = min(abs(z_score) / 3.0, 0.95)  # Higher Z = higher confidence
-        
-        # Overbought (price too high, expect reversion down)
-        elif z_score > self.entry_z:
-            action = 'SHORT'
-            confidence = min(abs(z_score) / 3.0, 0.95)
-        
-        # Additional filters
-        if action != 'HOLD':
-            # Volume confirmation (require above-average volume)
-            if volumes is not None:
-                avg_volume = np.mean(volumes[-20:])
-                if volumes[-1] < avg_volume * 0.8:
-                    confidence *= 0.7  # Reduce confidence
+        Args:
+            mid_price: Current mid price
+            equity: Available equity
             
-            # Volatility filter (avoid trading in extreme volatility)
-            recent_vol = np.std(closes[-20:] / closes[-21:-1] - 1)
-            hist_vol = np.std(closes[-50:-20] / closes[-51:-21] - 1)
-            
-            if recent_vol > hist_vol * 2.0:
-                confidence *= 0.6  # Too volatile
+        Returns:
+            Bid and ask quotes
+        """
+        half_spread = mid_price * (self.spread_pct / 100) / 2
         
-        # Stop loss and target
-        stop = std * 1.5  # 1.5 std dev stop
-        target = std * 2.5  # 2.5 std dev target (better R:R)
+        # Calculate order size
+        size_usd = equity * (self.order_size_pct / 100)
+        size = size_usd / mid_price
+        
+        # Skew quotes based on inventory
+        inventory_skew = self.inventory / self.max_inventory if self.max_inventory > 0 else 0
+        skew_adjustment = half_spread * inventory_skew * 0.5
+        
+        bid_price = mid_price - half_spread - skew_adjustment
+        ask_price = mid_price + half_spread - skew_adjustment
+        
+        # Reduce sizes if inventory limits reached
+        bid_size = size if self.inventory < self.max_inventory else 0
+        ask_size = size if self.inventory > -self.max_inventory else 0
         
         return {
-            'action': action,
-            'stop': stop,
-            'target': target,
-            'confidence': confidence,
-            'metadata': {
-                'z_score': z_score,
-                'mean': mean,
-                'std': std,
-                'upper_band': upper_band,
-                'lower_band': lower_band,
-                'entry_type': 'statistical_arbitrage'
-            }
+            'bid': {'price': round(bid_price, 2), 'size': round(bid_size, 6)},
+            'ask': {'price': round(ask_price, 2), 'size': round(ask_size, 6)},
+            'mid': mid_price,
+            'spread_bps': round((ask_price - bid_price) / mid_price * 10000, 2),
+            'inventory': self.inventory
         }
     
-    def check_exit(self, highs, lows, closes, position_side, 
-                   entry_price, entry_index, current_index):
-        """Exit when price reverts to mean"""
-        if current_index >= len(closes):
-            return None
-        
-        # Recalculate mean and z-score
-        mean = np.mean(closes[max(0, current_index-self.lookback):current_index+1])
-        std = np.std(closes[max(0, current_index-self.lookback):current_index+1])
-        
-        if std == 0:
-            return None
-        
-        current_price = closes[current_index]
-        z_score = (current_price - mean) / std
-        
-        # Exit when reverted to mean (z-score near 0)
-        if abs(z_score) < self.exit_z:
-            return {
-                'action': 'CLOSE',
-                'price': current_price,
-                'reason': 'mean_reversion_complete',
-                'z_score': z_score
-            }
-        
-        # Standard stop/target exits
-        return None
-
-
-class VolumeProfileStrategy(BaseStrategy):
-    """
-    Volume Profile Trading
-    
-    Concept:
-    - Trades based on volume-at-price levels
-    - Identifies high-volume nodes (support/resistance)
-    - Trades bounces from these levels
-    
-    Best for: All market conditions, especially ranging
-    Used by: Professional floor traders, institutions
-    """
-    
-    def __init__(self, vp_period: int = 200, num_bins: int = 20):
-        super().__init__("Volume Profile", "support_resistance")
-        
-        self.vp_period = vp_period
-        self.num_bins = num_bins
-        
-        self.parameters = {
-            'vp_period': vp_period,
-            'num_bins': num_bins
-        }
-    
-    def _calculate_volume_profile(self, closes, volumes):
-        """Calculate volume profile (POC, VAH, VAL)"""
-        if len(closes) < self.vp_period:
-            return None
-        
-        recent_closes = closes[-self.vp_period:]
-        recent_volumes = volumes[-self.vp_period:]
-        
-        # Create price bins
-        price_min = np.min(recent_closes)
-        price_max = np.max(recent_closes)
-        bins = np.linspace(price_min, price_max, self.num_bins + 1)
-        
-        # Aggregate volume at each price level
-        volume_at_price = np.zeros(self.num_bins)
-        
-        for i in range(len(recent_closes)):
-            bin_idx = np.digitize(recent_closes[i], bins) - 1
-            bin_idx = min(max(bin_idx, 0), self.num_bins - 1)
-            volume_at_price[bin_idx] += recent_volumes[i]
-        
-        # Point of Control (POC) - price level with highest volume
-        poc_idx = np.argmax(volume_at_price)
-        poc_price = (bins[poc_idx] + bins[poc_idx + 1]) / 2
-        
-        # Value Area (70% of volume)
-        total_volume = np.sum(volume_at_price)
-        value_area_volume = total_volume * 0.70
-        
-        # Find value area high and low
-        cumsum = 0
-        val_idx = poc_idx
-        
-        # Expand from POC until we reach 70% volume
-        for offset in range(self.num_bins):
-            if cumsum >= value_area_volume:
-                break
-            
-            if val_idx + offset < self.num_bins:
-                cumsum += volume_at_price[val_idx + offset]
-            if val_idx - offset >= 0:
-                cumsum += volume_at_price[val_idx - offset]
-        
-        vah_price = bins[min(poc_idx + offset, self.num_bins)]  # Value Area High
-        val_price = bins[max(poc_idx - offset, 0)]  # Value Area Low
-        
-        return {
-            'poc': poc_price,
-            'vah': vah_price,
-            'val': val_price,
-            'volume_distribution': volume_at_price,
-            'bins': bins
-        }
-    
-    def signal(self, highs, lows, closes, volumes=None):
-        """Generate volume profile signal"""
-        if not self.validate_data(highs, lows, closes):
-            return None
-        
-        if volumes is None or len(volumes) < self.vp_period:
-            return None
-        
-        vp = self._calculate_volume_profile(closes, volumes)
-        if vp is None:
-            return None
-        
-        current_price = closes[-1]
-        poc = vp['poc']
-        vah = vp['vah']
-        val = vp['val']
-        
-        action = 'HOLD'
-        confidence = 0.0
-        
-        # Long at Value Area Low (support)
-        if current_price <= val * 1.002:  # Within 0.2% of VAL
-            action = 'LONG'
-            confidence = 0.75
-        
-        # Short at Value Area High (resistance)
-        elif current_price >= vah * 0.998:  # Within 0.2% of VAH
-            action = 'SHORT'
-            confidence = 0.75
-        
-        # Mean reversion to POC
-        elif current_price < poc * 0.98:
-            action = 'LONG'
-            confidence = 0.65
-        elif current_price > poc * 1.02:
-            action = 'SHORT'
-            confidence = 0.65
-        
-        # Calculate stops and targets based on VP levels
-        if action == 'LONG':
-            stop = val * 0.996  # Stop below VAL
-            target = poc  # Target POC
-        elif action == 'SHORT':
-            stop = vah * 1.004  # Stop above VAH
-            target = poc  # Target POC
+    def on_fill(self, side: str, price: float, size: float):
+        """Handle order fill."""
+        if side == 'BUY':
+            self.inventory += size
         else:
-            stop = 0
-            target = 0
+            self.inventory -= size
         
-        return {
-            'action': action,
-            'stop': abs(current_price - stop) if stop else 0,
-            'target': abs(target - current_price) if target else 0,
-            'confidence': confidence,
-            'metadata': {
-                'poc': poc,
-                'vah': vah,
-                'val': val,
-                'entry_type': 'volume_profile'
-            }
-        }
+        self.trades += 1
+        logger.debug(f"MM Fill: {side} {size} @ {price}, Inventory: {self.inventory}")
     
-    def check_exit(self, highs, lows, closes, position_side,
-                   entry_price, entry_index, current_index):
-        """Exit at POC or if price breaks key levels"""
-        return None  # Use default exits
+    def get_stats(self) -> Dict:
+        """Get strategy statistics."""
+        return {
+            'inventory': round(self.inventory, 6),
+            'realized_pnl': round(self.realized_pnl, 2),
+            'total_trades': self.trades,
+            'is_hedged': abs(self.inventory) < 0.001
+        }
 
 
-class BreakoutMomentumStrategy(BaseStrategy):
+class GridTradingSystem:
     """
-    Breakout Momentum (Institutional)
+    Feature #85: Grid Trading System
     
-    Concept:
-    - Trades breakouts from consolidation ranges
-    - Confirms with volume and momentum
-    - Uses multiple timeframe confirmation
-    
-    Best for: Breakout regimes, trending markets
-    Used by: CTA funds, momentum traders
+    Places orders at fixed price intervals.
     """
     
-    def __init__(self, donchian_period: int = 20, 
-                 atr_multiplier: float = 2.0,
-                 min_consolidation_bars: int = 10):
-        super().__init__("Breakout Momentum", "breakout")
+    def __init__(
+        self,
+        grid_levels: int = 10,
+        grid_spacing_pct: float = 1.0,
+        order_size_usd: float = 100
+    ):
+        """
+        Initialize grid trading.
         
-        self.donchian_period = donchian_period
-        self.atr_mult = atr_multiplier
-        self.min_consolidation = min_consolidation_bars
+        Args:
+            grid_levels: Number of grid levels each direction
+            grid_spacing_pct: Space between levels (%)
+            order_size_usd: Order size per level
+        """
+        self.grid_levels = grid_levels
+        self.grid_spacing = grid_spacing_pct / 100
+        self.order_size_usd = order_size_usd
         
-        self.parameters = {
-            'donchian_period': donchian_period,
-            'atr_multiplier': atr_multiplier
-        }
+        self.grid_orders: Dict[float, Dict] = {}
+        self.filled_levels: List[Dict] = []
+        self.base_price: Optional[float] = None
+        self.total_profit = 0
+        
+        logger.info(f"Grid Trading initialized - {grid_levels} levels, {grid_spacing_pct}% spacing")
     
-    def _detect_consolidation(self, highs, lows, closes):
-        """Detect if market is consolidating (prerequisite for breakout)"""
-        if len(closes) < self.min_consolidation + 5:
-            return False
+    def setup_grid(self, base_price: float) -> List[Dict]:
+        """
+        Set up grid around a base price.
         
-        # Check if recent price range is narrow (consolidation)
-        recent_range = np.max(highs[-self.min_consolidation:]) - np.min(lows[-self.min_consolidation:])
-        historical_range = np.max(highs[-50:-self.min_consolidation]) - np.min(lows[-50:-self.min_consolidation])
+        Args:
+            base_price: Center price for grid
+            
+        Returns:
+            List of grid orders to place
+        """
+        self.base_price = base_price
+        self.grid_orders.clear()
+        orders = []
         
-        # Consolidation if recent range is < 60% of historical
-        is_consolidating = recent_range < historical_range * 0.6
+        for i in range(1, self.grid_levels + 1):
+            # Buy orders below
+            buy_price = base_price * (1 - i * self.grid_spacing)
+            buy_size = self.order_size_usd / buy_price
+            
+            orders.append({
+                'side': 'BUY',
+                'price': round(buy_price, 2),
+                'size': round(buy_size, 6),
+                'level': -i
+            })
+            self.grid_orders[round(buy_price, 2)] = {'side': 'BUY', 'level': -i}
+            
+            # Sell orders above
+            sell_price = base_price * (1 + i * self.grid_spacing)
+            sell_size = self.order_size_usd / sell_price
+            
+            orders.append({
+                'side': 'SELL',
+                'price': round(sell_price, 2),
+                'size': round(sell_size, 6),
+                'level': i
+            })
+            self.grid_orders[round(sell_price, 2)] = {'side': 'SELL', 'level': i}
         
-        return is_consolidating
+        return orders
     
-    def signal(self, highs, lows, closes, volumes=None):
-        """Generate breakout signal"""
-        if not self.validate_data(highs, lows, closes):
-            return None
+    def on_level_filled(self, price: float, side: str) -> Optional[Dict]:
+        """
+        Handle grid level fill.
         
-        if len(closes) < self.donchian_period + 50:
-            return None
+        Returns:
+            Counter order to place
+        """
+        self.filled_levels.append({'price': price, 'side': side, 'time': datetime.now()})
         
-        # Donchian channels (highest high, lowest low)
-        highest = np.max(highs[-self.donchian_period:-1])
-        lowest = np.min(lows[-self.donchian_period:-1])
+        # Place counter order at adjacent level
+        if side == 'BUY':
+            counter_price = price * (1 + self.grid_spacing)
+            counter_side = 'SELL'
+        else:
+            counter_price = price * (1 - self.grid_spacing)
+            counter_side = 'BUY'
         
-        current_price = closes[-1]
-        
-        # ATR for stops
-        atr = self._calculate_atr(highs, lows, closes)
-        
-        action = 'HOLD'
-        confidence = 0.0
-        
-        # Upside breakout
-        if current_price > highest:
-            # Check if we were consolidating before
-            was_consolidating = self._detect_consolidation(highs, lows, closes)
-            
-            action = 'LONG'
-            confidence = 0.80 if was_consolidating else 0.65
-            
-            # Volume confirmation
-            if volumes is not None:
-                avg_volume = np.mean(volumes[-20:])
-                if volumes[-1] > avg_volume * 1.3:
-                    confidence = min(confidence * 1.2, 0.95)
-        
-        # Downside breakdown
-        elif current_price < lowest:
-            was_consolidating = self._detect_consolidation(highs, lows, closes)
-            
-            action = 'SHORT'
-            confidence = 0.80 if was_consolidating else 0.65
-            
-            if volumes is not None:
-                avg_volume = np.mean(volumes[-20:])
-                if volumes[-1] > avg_volume * 1.3:
-                    confidence = min(confidence * 1.2, 0.95)
-        
-        stop = atr * self.atr_mult
-        target = atr * 4.0  # 2:1 reward:risk
+        profit = abs(price * self.grid_spacing) * (self.order_size_usd / price)
+        self.total_profit += profit
         
         return {
-            'action': action,
-            'stop': stop,
-            'target': target,
-            'confidence': confidence,
-            'metadata': {
-                'highest': highest,
-                'lowest': lowest,
-                'atr': atr,
-                'entry_type': 'breakout_momentum'
-            }
+            'side': counter_side,
+            'price': round(counter_price, 2),
+            'size': round(self.order_size_usd / counter_price, 6)
         }
     
-    def _calculate_atr(self, highs, lows, closes, period: int = 14):
-        """Calculate Average True Range"""
-        if len(closes) < period + 1:
-            return np.mean(highs[-period:] - lows[-period:])
-        
-        tr_list = []
-        for i in range(-period, 0):
-            tr = max(
-                highs[i] - lows[i],
-                abs(highs[i] - closes[i-1]),
-                abs(lows[i] - closes[i-1])
-            )
-            tr_list.append(tr)
-        
-        return np.mean(tr_list)
+    def get_stats(self) -> Dict:
+        """Get grid statistics."""
+        return {
+            'base_price': self.base_price,
+            'grid_levels': self.grid_levels,
+            'active_orders': len(self.grid_orders),
+            'filled_count': len(self.filled_levels),
+            'total_profit': round(self.total_profit, 2)
+        }
+
+
+class DCAAccumulator:
+    """
+    Feature #88: DCA Accumulator
     
-    def check_exit(self, highs, lows, closes, position_side,
-                   entry_price, entry_index, current_index):
-        """Exit on momentum loss"""
-        if current_index < entry_index + 5:
-            return None
+    Dollar-cost averaging for position building.
+    """
+    
+    def __init__(
+        self,
+        total_budget: float = 1000,
+        num_orders: int = 10,
+        interval_hours: float = 24,
+        dip_threshold_pct: float = 2.0
+    ):
+        """
+        Initialize DCA accumulator.
         
-        # Exit if price comes back inside the channel
-        donchian_high = np.max(highs[max(0, current_index-self.donchian_period):current_index])
-        donchian_low = np.min(lows[max(0, current_index-self.donchian_period):current_index])
+        Args:
+            total_budget: Total budget to deploy
+            num_orders: Number of DCA orders
+            interval_hours: Hours between orders
+            dip_threshold_pct: Extra buy on dips
+        """
+        self.total_budget = total_budget
+        self.num_orders = num_orders
+        self.order_size = total_budget / num_orders
+        self.interval_hours = interval_hours
+        self.dip_threshold = dip_threshold_pct / 100
         
-        current_price = closes[current_index]
+        self.executed_orders: List[Dict] = []
+        self.total_spent = 0
+        self.total_accumulated = 0
+        self.last_price: Optional[float] = None
+        self.highest_price: Optional[float] = None
         
-        if position_side == 'LONG' and current_price < donchian_high * 0.98:
-            return {'action': 'CLOSE', 'reason': 'momentum_lost'}
-        elif position_side == 'SHORT' and current_price > donchian_low * 1.02:
-            return {'action': 'CLOSE', 'reason': 'momentum_lost'}
+        logger.info(f"DCA initialized - ${total_budget} in {num_orders} orders")
+    
+    def should_buy(self, current_price: float) -> Dict:
+        """
+        Check if DCA order should execute.
+        
+        Args:
+            current_price: Current market price
+            
+        Returns:
+            Buy decision and size
+        """
+        if self.total_spent >= self.total_budget:
+            return {'should_buy': False, 'reason': 'Budget exhausted'}
+        
+        if len(self.executed_orders) >= self.num_orders:
+            return {'should_buy': False, 'reason': 'Order count reached'}
+        
+        # Update price tracking
+        if self.highest_price is None:
+            self.highest_price = current_price
+        else:
+            self.highest_price = max(self.highest_price, current_price)
+        
+        # Check for dip opportunity
+        dip_pct = (self.highest_price - current_price) / self.highest_price
+        
+        if dip_pct >= self.dip_threshold:
+            # Bonus buy on dip
+            bonus_size = self.order_size * min(dip_pct / self.dip_threshold, 2)
+            return {
+                'should_buy': True,
+                'size_usd': round(min(bonus_size, self.total_budget - self.total_spent), 2),
+                'reason': f'Dip detected: {dip_pct:.1%}',
+                'is_dip_buy': True
+            }
+        
+        return {
+            'should_buy': True,
+            'size_usd': round(min(self.order_size, self.total_budget - self.total_spent), 2),
+            'reason': 'Regular DCA',
+            'is_dip_buy': False
+        }
+    
+    def record_buy(self, price: float, size_usd: float):
+        """Record an executed buy."""
+        size = size_usd / price
+        
+        self.executed_orders.append({
+            'price': price,
+            'size_usd': size_usd,
+            'size': size,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        self.total_spent += size_usd
+        self.total_accumulated += size
+        self.last_price = price
+    
+    def get_average_price(self) -> float:
+        """Get average buy price."""
+        if self.total_accumulated == 0:
+            return 0
+        return self.total_spent / self.total_accumulated
+    
+    def get_stats(self) -> Dict:
+        """Get DCA statistics."""
+        avg_price = self.get_average_price()
+        return {
+            'total_spent': round(self.total_spent, 2),
+            'total_accumulated': round(self.total_accumulated, 6),
+            'average_price': round(avg_price, 2),
+            'orders_executed': len(self.executed_orders),
+            'orders_remaining': self.num_orders - len(self.executed_orders),
+            'budget_remaining': round(self.total_budget - self.total_spent, 2)
+        }
+
+
+class MomentumScalper:
+    """
+    Feature #92: Momentum Scalper
+    
+    Quick trades based on short-term momentum.
+    """
+    
+    def __init__(
+        self,
+        rsi_period: int = 7,
+        overbought: float = 70,
+        oversold: float = 30,
+        target_pct: float = 0.3,
+        stop_pct: float = 0.15,
+        max_hold_minutes: int = 30
+    ):
+        """
+        Initialize momentum scalper.
+        
+        Args:
+            rsi_period: RSI calculation period
+            overbought: RSI overbought level
+            oversold: RSI oversold level
+            target_pct: Take profit %
+            stop_pct: Stop loss %
+            max_hold_minutes: Maximum hold time
+        """
+        self.rsi_period = rsi_period
+        self.overbought = overbought
+        self.oversold = oversold
+        self.target_pct = target_pct / 100
+        self.stop_pct = stop_pct / 100
+        self.max_hold_minutes = max_hold_minutes
+        
+        self.position: Optional[Dict] = None
+        self.trades: List[Dict] = []
+        
+        logger.info(f"Momentum Scalper initialized - RSI({rsi_period}) {oversold}/{overbought}")
+    
+    def calculate_rsi(self, prices: List[float]) -> float:
+        """Calculate RSI from price list."""
+        if len(prices) < self.rsi_period + 1:
+            return 50
+        
+        changes = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+        changes = changes[-self.rsi_period:]
+        
+        gains = [c if c > 0 else 0 for c in changes]
+        losses = [-c if c < 0 else 0 for c in changes]
+        
+        avg_gain = sum(gains) / self.rsi_period
+        avg_loss = sum(losses) / self.rsi_period
+        
+        if avg_loss == 0:
+            return 100
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return round(rsi, 2)
+    
+    def generate_signal(self, prices: List[float], volume: float = 0) -> Optional[Dict]:
+        """Generate scalping signal."""
+        if self.position:
+            return None  # Already in position
+        
+        rsi = self.calculate_rsi(prices)
+        current_price = prices[-1]
+        
+        # Check momentum at extremes
+        if rsi <= self.oversold:
+            return {
+                'side': 'LONG',
+                'entry': current_price,
+                'target': current_price * (1 + self.target_pct),
+                'stop': current_price * (1 - self.stop_pct),
+                'rsi': rsi,
+                'reason': f'RSI oversold: {rsi}'
+            }
+        
+        if rsi >= self.overbought:
+            return {
+                'side': 'SHORT',
+                'entry': current_price,
+                'target': current_price * (1 - self.target_pct),
+                'stop': current_price * (1 + self.stop_pct),
+                'rsi': rsi,
+                'reason': f'RSI overbought: {rsi}'
+            }
         
         return None
+    
+    def enter_position(self, signal: Dict):
+        """Enter a position."""
+        self.position = {
+            **signal,
+            'entry_time': datetime.now()
+        }
+    
+    def check_exit(self, current_price: float) -> Optional[Dict]:
+        """Check if position should exit."""
+        if not self.position:
+            return None
+        
+        pos = self.position
+        
+        # Check target
+        if pos['side'] == 'LONG' and current_price >= pos['target']:
+            return self._close_position(current_price, 'target')
+        if pos['side'] == 'SHORT' and current_price <= pos['target']:
+            return self._close_position(current_price, 'target')
+        
+        # Check stop
+        if pos['side'] == 'LONG' and current_price <= pos['stop']:
+            return self._close_position(current_price, 'stop')
+        if pos['side'] == 'SHORT' and current_price >= pos['stop']:
+            return self._close_position(current_price, 'stop')
+        
+        # Check time
+        hold_time = (datetime.now() - pos['entry_time']).total_seconds() / 60
+        if hold_time >= self.max_hold_minutes:
+            return self._close_position(current_price, 'timeout')
+        
+        return None
+    
+    def _close_position(self, exit_price: float, reason: str) -> Dict:
+        """Close current position."""
+        pos = self.position
+        
+        if pos['side'] == 'LONG':
+            pnl_pct = (exit_price - pos['entry']) / pos['entry'] * 100
+        else:
+            pnl_pct = (pos['entry'] - exit_price) / pos['entry'] * 100
+        
+        trade = {
+            'side': pos['side'],
+            'entry': pos['entry'],
+            'exit': exit_price,
+            'pnl_pct': round(pnl_pct, 3),
+            'reason': reason,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        self.trades.append(trade)
+        self.position = None
+        
+        return trade
+    
+    def get_stats(self) -> Dict:
+        """Get scalper statistics."""
+        if not self.trades:
+            return {'total_trades': 0}
+        
+        wins = [t for t in self.trades if t['pnl_pct'] > 0]
+        
+        return {
+            'total_trades': len(self.trades),
+            'win_rate': round(len(wins) / len(self.trades) * 100, 1),
+            'avg_pnl_pct': round(sum(t['pnl_pct'] for t in self.trades) / len(self.trades), 3),
+            'best_trade': max(t['pnl_pct'] for t in self.trades),
+            'worst_trade': min(t['pnl_pct'] for t in self.trades),
+            'in_position': self.position is not None
+        }
 
 
-if __name__ == "__main__":
-    # Test strategies
-    print("Testing advanced institutional strategies...")
+# Singletons
+_market_maker: Optional[MarketMakingStrategy] = None
+_grid: Optional[GridTradingSystem] = None
+_dca: Optional[DCAAccumulator] = None
+_scalper: Optional[MomentumScalper] = None
+
+
+def get_market_maker() -> MarketMakingStrategy:
+    global _market_maker
+    if _market_maker is None:
+        _market_maker = MarketMakingStrategy()
+    return _market_maker
+
+
+def get_grid_trader() -> GridTradingSystem:
+    global _grid
+    if _grid is None:
+        _grid = GridTradingSystem()
+    return _grid
+
+
+def get_dca() -> DCAAccumulator:
+    global _dca
+    if _dca is None:
+        _dca = DCAAccumulator()
+    return _dca
+
+
+def get_scalper() -> MomentumScalper:
+    global _scalper
+    if _scalper is None:
+        _scalper = MomentumScalper()
+    return _scalper
+
+
+if __name__ == '__main__':
+    # Test market maker
+    mm = MarketMakingStrategy()
+    quotes = mm.generate_quotes(50000, 10000)
+    print(f"MM Quotes: {quotes}")
     
-    # Generate test data
-    np.random.seed(42)
-    closes = 45000 + np.random.randn(300).cumsum() * 50
-    highs = closes * 1.002
-    lows = closes * 0.998
-    volumes = np.random.uniform(800, 1200, 300)
+    # Test grid
+    grid = GridTradingSystem(grid_levels=5, grid_spacing_pct=1.0)
+    orders = grid.setup_grid(50000)
+    print(f"Grid orders: {len(orders)}")
     
-    # Test Statistical Arbitrage
-    stat_arb = StatisticalArbitrageStrategy()
-    signal = stat_arb.signal(highs, lows, closes, volumes)
-    print("\n" + "=" * 70)
-    print("STATISTICAL ARBITRAGE")
-    print("=" * 70)
-    print(f"Signal: {signal}")
+    # Test DCA
+    dca = DCAAccumulator(total_budget=500, num_orders=5)
+    decision = dca.should_buy(50000)
+    print(f"DCA decision: {decision}")
     
-    # Test Volume Profile
-    vp_strategy = VolumeProfileStrategy()
-    signal = vp_strategy.signal(highs, lows, closes, volumes)
-    print("\n" + "=" * 70)
-    print("VOLUME PROFILE")
-    print("=" * 70)
-    print(f"Signal: {signal}")
-    
-    # Test Breakout Momentum
-    breakout = BreakoutMomentumStrategy()
-    signal = breakout.signal(highs, lows, closes, volumes)
-    print("\n" + "=" * 70)
-    print("BREAKOUT MOMENTUM")
-    print("=" * 70)
-    print(f"Signal: {signal}")
-    
-    print("\n✅ Advanced strategies test complete")
+    # Test scalper
+    scalper = MomentumScalper()
+    prices = [50000 + i*10 for i in range(20)] + [50200 - i*20 for i in range(15)]
+    signal = scalper.generate_signal(prices)
+    print(f"Scalper signal: {signal}")

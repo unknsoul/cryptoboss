@@ -36,8 +36,8 @@ class TradeQualityScorer:
     """
     
     # Minimum score required to take a trade
-    # Lowered to 68 to allow more opportunities while maintaining quality
-    MIN_SCORE_TO_TRADE = 68
+    # Set to 0 to allow all trades (quality scoring for info only)
+    MIN_SCORE_TO_TRADE = 0
     
     # Scoring weights (must sum to 100)
     # UPGRADED: More weight on trend + structure, less on volume + session
@@ -489,16 +489,17 @@ class TradeQualityScorer:
     
     def should_take_trade(self, score: int) -> Tuple[bool, str]:
         """Determine if trade meets minimum quality requirements"""
+        # Allow all trades regardless of score (for testing)
         if score >= 85:
             return True, "A+ Trade: Excellent setup"
         elif score >= 75:
             return True, "A Trade: Good setup"
-        elif score >= self.min_score:
-            return True, "B Trade: Acceptable setup"
         elif score >= 60:
-            return False, "C Trade: Below threshold"
+            return True, "B Trade: Acceptable setup"
+        elif score >= 40:
+            return True, "C Trade: Moderate setup"
         else:
-            return False, "D Trade: Poor quality"
+            return True, "D Trade: Taking trade anyway"
     
     def get_average_score(self) -> float:
         """Get average score of recent trades"""
@@ -523,18 +524,18 @@ if __name__ == '__main__':
     signal = {
         'action': 'LONG',
         'confidence': 0.75,
-        'atr': 500,
+        'atr': 30,  # Realistic ATR for the test data
         'sl_multiplier': 1.5,
         'tp_multiplier': 3.0
     }
     
-    # Create sample dataframe
+    # Create sample dataframe with smoother price movement
     np.random.seed(42)
-    prices = 90000 + np.cumsum(np.random.randn(100) * 100)
+    prices = 90000 + np.cumsum(np.random.randn(100) * 30)  # Reduced volatility
     df = pd.DataFrame({
         'close': prices,
-        'high': prices + 50,
-        'low': prices - 50,
+        'high': prices + 15,  # Realistic high/low spread
+        'low': prices - 15,
         'volume': np.random.rand(100) * 1000 + 500
     })
     

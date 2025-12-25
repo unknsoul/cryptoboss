@@ -224,7 +224,7 @@ class MultiTimeframeAnalyzer:
         df_htf: pd.DataFrame,
         df_mtf: pd.DataFrame,
         df_ltf: pd.DataFrame,
-        min_confidence: float = 0.65
+        min_confidence: float = 0.40  # Lowered for more signals
     ) -> MultiTimeframeSignal:
         """
         Generate multi-timeframe signal
@@ -381,7 +381,7 @@ if __name__ == '__main__':
     analyzer = MultiTimeframeAnalyzer(htf_period='1h', mtf_period='15m', ltf_period='5m')
     
     # Generate signal
-    signal = analyzer.generate_signal(df_htf, df_mtf, df_ltf, min_confidence=0.65)
+    signal = analyzer.generate_signal(df_htf, df_mtf, df_ltf, min_confidence=0.40)
     
     print(f"\nMulti-Timeframe Signal:")
     print(f"  Action: {signal.action}")

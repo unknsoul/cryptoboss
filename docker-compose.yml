@@ -1,0 +1,32 @@
+# Docker Compose for Trading Bot Stack
+version: '3.8'
+
+services:
+  trading-bot:
+    build: .
+    container_name: cryptoboss_bot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENABLE_DAILY_LOSS_LIMITS=true
+      - MARKET_TIMEZONE=America/New_York
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+    networks:
+      - trading-net
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  trading-net:
+    driver: bridge

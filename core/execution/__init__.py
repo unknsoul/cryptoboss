@@ -1,7 +1,6 @@
 """
-Execution package for advanced order routing
+Execution package
 """
+from .advanced_orders import AdvancedOrderManager
 
-from .smart_orders import TWAPExecutor, VWAPExecutor
-
-__all__ = ['TWAPExecutor', 'VWAPExecutor']
+__all__ = ['AdvancedOrderManager']

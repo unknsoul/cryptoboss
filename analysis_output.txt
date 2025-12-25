@@ -1,0 +1,82 @@
+﻿============================================================
+TRADE ANALYSIS REPORT
+============================================================
+
+Total trades: 31
+
+Wins: 22, Losses: 9
+Win rate: 71.0%
+
+Total Profit: $101.30
+Total Loss: $-91.40
+Net P&L: $9.90
+
+Avg Win: $4.60
+Avg Loss: $10.16
+Win/Loss Size Ratio: 0.45
+  (Should be > 1.0 for profitable system)
+
+============================================================
+LAST 5 TRADES:
+============================================================
+  SHORT: Entry $87,264 -> Exit $87,510, PnL: $-14.16, Time: 2025-12-23T20:50:35
+  SHORT: Entry $87,239 -> Exit $87,485, PnL: $-14.10, Time: 2025-12-23T21:08:42
+  SHORT: Entry $87,376 -> Exit $87,654, PnL: $-15.93, Time: 2025-12-23T21:33:03
+  SHORT: Entry $88,056 -> Exit $87,744, PnL: +$5.84, Time: 2025-12-23T21:38:52
+  SHORT: Entry $88,056 -> Exit $87,750, PnL: +$11.64, Time: 2025-12-23T21:38:55
+
+Last trade timestamp: 2025-12-23T21:38:55.635494
+
+============================================================
+RECENT DEBUG TRACE (Signal Blocks):
+============================================================
+
+============================================================
+DIAGNOSIS:
+============================================================
+python : Traceback 
+(most recent call 
+last):
+At line:1 char:1
++ python 
+analyze_trades.py 
+2>&1 | Out-File 
+-FilePath 
+analysis_output.tx 
+...
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (Traceba   
+ ck (most recent     
+call last)::Stri    
+ng) [], RemoteEx    
+ception
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+  File "D:\projects\f
+inal99\analyze_trades
+.py", line 97, in 
+<module>
+    print(f"ISSUE 
+{i+1}: {issue}")
+  File "C:\Users\hard
+i\AppData\Local\Progr
+ams\Python\Python310\
+lib\encodings\cp1252.
+py", line 19, in 
+encode
+    return codecs.cha
+rmap_encode(input,sel
+f.errors,encoding_tab
+le)[0]
+UnicodeEncodeError: 
+'charmap' codec 
+can't encode 
+character '\u274c' 
+in position 9: 
+character maps to 
+<undefined>

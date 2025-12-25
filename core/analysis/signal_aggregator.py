@@ -12,7 +12,7 @@ class SignalAggregator:
     Combines input from multiple strategies to form a consensus.
     """
     def __init__(self):
-        self.min_confidence_threshold = 0.65
+        self.min_confidence_threshold = 0.40  # Lowered for more signals
         
     def aggregate_signals(self, strategy_signals: List[Dict]) -> Optional[Dict[str, Any]]:
         """

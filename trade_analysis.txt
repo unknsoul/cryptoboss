@@ -1,0 +1,57 @@
+﻿
+=== LAST 5 TRADES ANALYSIS ===
+
+Trade 33:
+  Side: LONG
+  Entry: $0.00
+  TP: $0.00 (distance: $0.00)
+  SL: $0.00 (distance: $0.00)
+  R:R Ratio: 0.00:1
+  Return: -0.02%
+  Time: 2025-12-24T10:26:56
+
+Trade 34:
+  Side: LONG
+  Entry: $0.00
+  TP: $0.00 (distance: $0.00)
+  SL: $0.00 (distance: $0.00)
+  R:R Ratio: 0.00:1
+  Return: 0.00%
+  Time: 2025-12-24T17:42:36
+
+Trade 35:
+  Side: LONG
+  Entry: $0.00
+  TP: $0.00 (distance: $0.00)
+  SL: $0.00 (distance: $0.00)
+  R:R Ratio: 0.00:1
+  Return: 0.00%
+  Time: 2025-12-24T17:42:40
+
+Trade 36:
+  Side: LONG
+  Entry: $0.00
+  TP: $0.00 (distance: $0.00)
+  SL: $0.00 (distance: $0.00)
+  R:R Ratio: 0.00:1
+  Return: 0.00%
+  Time: 2025-12-24T17:56:56
+
+Trade 37:
+  Side: LONG
+  Entry: $0.00
+  TP: $0.00 (distance: $0.00)
+  SL: $0.00 (distance: $0.00)
+  R:R Ratio: 0.00:1
+  Return: 0.01%
+  Time: 2025-12-24T17:57:00
+
+
+=== TRADE FREQUENCY ===
+
+Trade 33 to 34: 435.7 minutes apart
+Trade 34 to 35: 0.1 minutes apart
+Trade 35 to 36: 14.3 minutes apart
+Trade 36 to 37: 0.1 minutes apart
+
+Total trades: 37

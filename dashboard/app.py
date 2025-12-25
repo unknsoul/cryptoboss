@@ -10,9 +10,23 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
-import json
 import asyncio
+from typing import List, Dict, Any, Optional
+import json
+import logging
+import requests
+import signal
+from concurrent.futures import ThreadPoolExecutor
+
+# === CORE IMPORTS ===
+from core.storage.database import SQLiteManager
+from core.config import settings
+from core.api.health import router as health_router
+
+# Initialize DB Manager
+db_manager = SQLiteManager()
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -26,6 +40,9 @@ app = FastAPI(
     description="Professional Crypto Trading Dashboard",
     version="2.0.0"
 )
+
+# Register health check endpoint
+app.include_router(health_router)
 
 # Shared trading state
 trading_state: Dict[str, Any] = {
@@ -101,9 +118,11 @@ async def get_positions():
 
 @app.get("/api/trades")
 async def get_trades(limit: int = 20):
+    # Load from DB for persistence
+    trades = db_manager.load_trades(limit=limit)
     return {
-        'trades': trading_state['trades'][-limit:],
-        'total': len(trading_state['trades'])
+        'trades': trades,
+        'total': len(trades)
     }
 
 
@@ -114,12 +133,80 @@ async def get_signals(limit: int = 10):
 
 @app.get("/api/candles")
 async def get_candles():
-    return {'candles': trading_state.get('candles', [])}
+    """Fetch real candle data from Binance API."""
+    import requests
+    
+    try:
+        # Fetch real klines from Binance public API (no API key needed)
+        url = "https://api.binance.com/api/v3/klines"
+        params = {
+            'symbol': 'BTCUSDT',
+            'interval': '1h',
+            'limit': 100
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        candles = []
+        for kline in data:
+            candles.append({
+                'time': int(kline[0] / 1000),  # Convert ms to seconds
+                'open': float(kline[1]),
+                'high': float(kline[2]),
+                'low': float(kline[3]),
+                'close': float(kline[4])
+            })
+        
+        # Update current price in trading state
+        if candles:
+            trading_state['current_price'] = candles[-1]['close']
+        
+        return {'candles': candles}
+    
+    except Exception as e:
+        logger.error(f"Failed to fetch candles from Binance: {e}")
+        # Fallback to cached data
+        return {'candles': trading_state.get('candles', [])}
 
 
 @app.get("/api/orderbook")
 async def get_orderbook():
-    return trading_state.get('orderbook', {'bids': [], 'asks': [], 'spread': 0})
+    """Fetch real orderbook data from Binance API."""
+    import requests
+    
+    try:
+        # Fetch real orderbook from Binance public API
+        url = "https://api.binance.com/api/v3/depth"
+        params = {
+            'symbol': 'BTCUSDT',
+            'limit': 10  # Get top 10 bids and asks
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Convert to [price, qty] format
+        bids = [[float(b[0]), float(b[1])] for b in data['bids']]
+        asks = [[float(a[0]), float(a[1])] for a in data['asks']]
+        
+        # Calculate spread
+        spread = asks[0][0] - bids[0][0] if bids and asks else 0
+        mid_price = (asks[0][0] + bids[0][0]) / 2 if bids and asks else 0
+        
+        return {
+            'bids': bids,
+            'asks': asks,
+            'spread': round(spread, 2),
+            'mid_price': round(mid_price, 2)
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to fetch orderbook from Binance: {e}")
+        # Fallback with empty data
+        return {'bids': [], 'asks': [], 'spread': 0, 'mid_price': 0}
 
 
 @app.get("/api/sentiment")
@@ -173,6 +260,80 @@ async def update_metrics(request: Request):
     data = await request.json()
     trading_state['metrics'].update(data)
     return {'status': 'ok'}
+
+
+# === RESET DASHBOARD ENDPOINT ===
+@app.post("/api/reset-dashboard")
+async def reset_dashboard():
+    """Reset all dashboard data to fresh state"""
+    trading_state['trades'] = []
+    trading_state['signals'] = []
+    trading_state['positions'] = []
+    trading_state['equity'] = 10000.0
+    trading_state['initial_capital'] = 10000.0
+    trading_state['metrics'] = {
+        'total_return': 0.0,
+        'win_rate': 0.0,
+        'sharpe_ratio': 0.0,
+        'max_drawdown': 0.0,
+        'num_trades': 0,
+        'profit_factor': 0.0,
+        'win_streak': 0,
+        'loss_streak': 0
+    }
+    
+    # Set reset flag for bot to clear its internal state
+    trading_state['reset_requested'] = True
+    
+    # Clear DB data
+    db_manager.clear_all_data()
+    
+    return {'status': 'success', 'message': 'Dashboard reset to fresh state'}
+
+
+# === FEATURE #307: Kill-Switch Automation ===
+@app.post("/api/emergency-stop")
+async def emergency_stop():
+    """
+    Emergency kill switch - immediately halts trading and optionally closes positions.
+    
+    This is a CRITICAL safety feature for catastrophic market events.
+    """
+    try:
+        trading_state['system_status'] = 'EMERGENCY_HALT'
+        trading_state['emergency_halt'] = True
+        trading_state['halt_reason'] = 'Manual emergency stop triggered'
+        trading_state['halt_time'] = datetime.now().isoformat()
+        
+        return {
+            'status': 'halted',
+            'message': 'Emergency stop activated. Trading halted immediately.',
+            'positions': trading_state.get('positions', []),
+            'halt_time': trading_state['halt_time']
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@app.post("/api/resume-trading")
+async def resume_trading():
+    """Resume trading after emergency stop."""
+    trading_state['system_status'] = 'running'
+    trading_state['emergency_halt'] = False
+    trading_state['halt_reason'] = None
+    return {'status': 'resumed', 'message': 'Trading resumed'}
+
+
+@app.get("/api/safety-status")
+async def get_safety_status():
+    """Get current safety system status including circuit breaker."""
+    return {
+        'system_status': trading_state.get('system_status', 'running'),
+        'emergency_halt': trading_state.get('emergency_halt', False),
+        'circuit_breaker': trading_state.get('circuit_breaker', {}),
+        'halt_reason': trading_state.get('halt_reason'),
+        'halt_time': trading_state.get('halt_time')
+    }
 
 
 # ==================== PROFESSIONAL DASHBOARD HTML ====================
@@ -712,6 +873,13 @@ def get_professional_dashboard_html() -> str:
         </div>
     </header>
 
+    <!-- Reset Dashboard Button -->
+    <div style="padding: 12px 32px; background: var(--bg-card); border-bottom: 1px solid var(--glass-border); display: flex; justify-content: flex-end;">
+        <button onclick="resetDashboard()" style="padding: 10px 24px; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; transition: all 0.3s; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);">
+            🔄 Reset Dashboard
+        </button>
+    </div>
+
     <main class="main">
         <!-- Chart Section -->
         <section class="card chart-section">
@@ -1013,7 +1181,7 @@ def get_professional_dashboard_html() -> str:
                     // Closed trade
                     const pnl = item.pnl || 0;
                     const pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
-                    const pnlSign = pnl >= 0 ? '+' : '';
+                    const pnlSign = pnl >= 0 ? '+' : '-';
                     const sideClass = item.side === 'LONG' ? 'long' : 'short';
                     
                     html += `<tr>
@@ -1066,7 +1234,7 @@ def get_professional_dashboard_html() -> str:
                         allTrades.push({
                             isLive: false,
                             side: trade.side,
-                            price: trade.exit || trade.entry,
+                            price: trade.exit_price || trade.entry_price || trade.price,
                             pnl: trade.pnl || 0,
                             time: timeStr
                         });
@@ -1126,6 +1294,23 @@ def get_professional_dashboard_html() -> str:
                 }
             } catch (e) {
                 console.error('Signals update error:', e);
+            }
+        }
+
+        // Reset Dashboard Function
+        async function resetDashboard() {
+            if (confirm('Reset all dashboard data to fresh start? This will clear all trades and reset equity to $10,000.')) {
+                try {
+                    const response = await fetch('/api/reset-dashboard', { method: 'POST' });
+                    const result = await response.json();
+                    if (result.status === 'success') {
+                        alert('Dashboard reset successfully!');
+                        location.reload();
+                    }
+                } catch (e) {
+                    console.error('Reset error:', e);
+                    alert('Error resetting dashboard');
+                }
             }
         }
 

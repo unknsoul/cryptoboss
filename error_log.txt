@@ -1,0 +1,1 @@
+﻿2025-12-24 16:41:24,727 - __main__ - CRITICAL - Critical Core Component Missing: cannot import name 'StatisticalArbitrageStrategy' from 'core.strategies.advanced_strategies' (D:\projects\final99\core\strategies\advanced_strategies.py)

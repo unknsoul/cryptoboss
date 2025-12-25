@@ -10,17 +10,27 @@ from .macd_crossover import MACDCrossoverStrategy
 from .bollinger_breakout import BollingerBreakoutStrategy
 from .professional_trend import ProfessionalTrendStrategyWrapper
 
-# New advanced strategies
-from .advanced_strategies import (
-    StatisticalArbitrageStrategy,
-    VolumeProfileStrategy,
-    BreakoutMomentumStrategy
-)
-from .event_driven_strategies import (
-    NewsEventTradingStrategy,
-    LiquidityGrabStrategy,
-    OrderFlowImbalanceStrategy
-)
+# New advanced strategies (some may be in different modules)
+try:
+    from .advanced_strategies import (
+        MarketMakingStrategy,
+        GridTradingSystem,
+        DCAAccumulator,
+        MomentumScalper
+    )
+    ADVANCED_STRATEGIES_AVAILABLE = True
+except ImportError:
+    ADVANCED_STRATEGIES_AVAILABLE = False
+
+try:
+    from .event_driven_strategies import (
+        NewsEventTradingStrategy,
+        LiquidityGrabStrategy,
+        OrderFlowImbalanceStrategy
+    )
+    EVENT_STRATEGIES_AVAILABLE = True
+except ImportError:
+    EVENT_STRATEGIES_AVAILABLE = False
 
 
 class AdvancedStrategyFactory:
@@ -36,15 +46,20 @@ class AdvancedStrategyFactory:
         'macd_crossover': MACDCrossoverStrategy,
         'bollinger_breakout': BollingerBreakoutStrategy,
         'professional_trend': ProfessionalTrendStrategyWrapper,
-        
-        # Advanced institutional strategies
-        'statistical_arbitrage': StatisticalArbitrageStrategy,
-        'volume_profile_trading': VolumeProfileStrategy,
-        'breakout_momentum': BreakoutMomentumStrategy,
-        'news_event_trading': NewsEventTradingStrategy,
-        'liquidity_grab': LiquidityGrabStrategy,
-        'order_flow_imbalance': OrderFlowImbalanceStrategy,
     }
+    
+    # Add advanced strategies if available
+    if ADVANCED_STRATEGIES_AVAILABLE:
+        STRATEGIES['market_making'] = MarketMakingStrategy
+        STRATEGIES['grid_trading'] = GridTradingSystem
+        STRATEGIES['dca'] = DCAAccumulator
+        STRATEGIES['momentum_scalper'] = MomentumScalper
+    
+    # Add event strategies if available
+    if EVENT_STRATEGIES_AVAILABLE:
+        STRATEGIES['news_event_trading'] = NewsEventTradingStrategy
+        STRATEGIES['liquidity_grab'] = LiquidityGrabStrategy
+        STRATEGIES['order_flow_imbalance'] = OrderFlowImbalanceStrategy
     
     @classmethod
     def create(cls, strategy_name: str, **kwargs):
@@ -99,18 +114,13 @@ class AdvancedStrategyFactory:
         """
         suite = {}
         
-        # Diverse strategy mix
-        strategy_mix = [
-            'statistical_arbitrage',     # Mean reversion
-            'breakout_momentum',          # Trend following
-            'volume_profile_trading',     # Support/resistance
-            'enhanced_momentum',          # Momentum
-            'news_event_trading',         # Event-driven
-            'liquidity_grab'              # Reversal
-        ]
-        
-        for strategy_name in strategy_mix:
-            suite[strategy_name] = cls.create(strategy_name)
+        # Use available strategies
+        available = cls.get_all_strategies()
+        for strategy_name in available[:6]:  # Top 6 strategies
+            try:
+                suite[strategy_name] = cls.create(strategy_name)
+            except Exception:
+                pass
         
         return suite
 

@@ -34,9 +34,7 @@ class InstitutionalRiskManager:
     
     def __init__(self):
         self.var_history = []
-        self.stress_test_results =
-
- []
+        self.stress_test_results = []
     
     def calculate_var(self,
                      returns: np.ndarray,
