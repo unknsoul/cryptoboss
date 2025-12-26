@@ -1,0 +1,13 @@
+{
+  "version_id": "signal_classifier_20251226_114549",
+  "model_name": "signal_classifier",
+  "created_at": "2025-12-26T11:45:49.832361",
+  "num_features": 28,
+  "has_scaler": true,
+  "walk_forward_accuracy": 0.7742857142857142,
+  "walk_forward_precision": 0.7549909255898367,
+  "walk_forward_recall": 0.6968174204355109,
+  "f1_score": 0.7247386759581882,
+  "training_samples": 1832,
+  "model_type": "randomforest"
+}

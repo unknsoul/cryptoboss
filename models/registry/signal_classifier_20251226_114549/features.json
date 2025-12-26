@@ -1,0 +1,32 @@
+{
+  "features": [
+    "returns_1",
+    "returns_4",
+    "returns_24",
+    "log_returns_1",
+    "log_returns_4",
+    "returns_roll_mean_10",
+    "returns_roll_std_10",
+    "returns_zscore_20",
+    "volatility_atr_14",
+    "volatility_atr_28",
+    "volatility_realized_24",
+    "volatility_realized_168",
+    "volatility_ratio",
+    "momentum_roc_10",
+    "momentum_roc_20",
+    "momentum_slope_20",
+    "momentum_acceleration",
+    "volume_relative_24",
+    "volume_momentum_10",
+    "price_volume_corr_20",
+    "ma_ratio_20_50",
+    "price_to_ma20",
+    "price_to_ma50",
+    "adx_14",
+    "regime_trending",
+    "regime_high_vol",
+    "returns_skew_20",
+    "returns_kurt_20"
+  ]
+}
