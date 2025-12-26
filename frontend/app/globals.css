@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  @apply bg-bg-primary text-text-primary;
+  font-family: var(--font-mono);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-bg-secondary;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-text-muted;
+}
+
+/* Professional button styles */
+.btn {
+  @apply px-4 py-2 rounded font-medium transition-all duration-200;
+}
+
+.btn-primary {
+  @apply bg-accent-blue text-white hover:bg-opacity-80;
+}
+
+.btn-success {
+  @apply bg-accent-green text-white hover:bg-opacity-80;
+}
+
+.btn-danger {
+  @apply bg-accent-red text-white hover:bg-opacity-80;
+}
+
+.btn-secondary {
+  @apply bg-bg-tertiary text-text-primary hover:bg-opacity-80;
+}
+
+/* Card styles */
+.card {
+  @apply bg-bg-secondary border border-border rounded-lg p-4;
+}
+
+/* Table styles */
+.table {
+  @apply w-full text-sm;
+}
+
+.table th {
+  @apply text-left text-text-secondary font-medium py-2 px-4 border-b border-bg-border;
+}
+
+.table td {
+  @apply py-3 px-4 border-b border-border;
+}
+
+.table tr:hover {
+  @apply bg-bg-tertiary;
+}
+
+/* Status indicators */
+.status-long {
+  @apply text-accent-green;
+}
+
+.status-short {
+  @apply text-accent-red;
+}
+
+.status-neutral {
+  @apply text-text-secondary;
+}
