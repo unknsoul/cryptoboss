@@ -15,7 +15,14 @@ logger = logging.getLogger(__name__)
 
 # Import existing components
 try:
-    from core.storage.database import SQLiteManager
+    from src.core.storage.database import SQLiteManager
+except ImportError:
+    try:
+        from core.storage.database import SQLiteManager
+    except ImportError:
+        SQLiteManager = None
+
+try:
     from src.backtest import RealBacktestEngine
     from src.models import ModelRegistry
     from src.risk import KillSwitch, VolatilityAdjustedSizing

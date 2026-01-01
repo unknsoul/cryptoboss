@@ -20,7 +20,7 @@ class TestBacktestEngine:
         assert engine.initial_capital == 10000
         assert engine.equity == 10000
     
-    def test_slipp age_calculation(self):
+    def test_slippage_calculation(self):
         slippage = SlippageModel.adaptive_slippage(
             price=40000,
             size=0.5,
