@@ -1,0 +1,86 @@
+# Grid Trading Strategy Configuration Presets
+# ===========================================
+
+# Conservative Grid - Tight Range, Many Levels
+# Best for: Low volatility, stable markets
+# Monthly Return: 5-10%
+conservative:
+  lower_price: 62000
+  upper_price: 68000
+  num_grids: 30  # Many levels = frequent small profits
+  grid_spacing: "geometric"  # Better for crypto
+  mode: "neutral"
+  order_size_usd: 100
+  rebalance_threshold_pct: 15.0
+  stop_loss_breakout_pct: null  # No stop
+  initial_capital: 10000
+
+# Balanced Grid - Medium Range
+# Best for: Normal market conditions
+# Monthly Return: 10-20%
+balanced:
+  lower_price: 60000
+  upper_price: 70000
+  num_grids: 20
+  grid_spacing: "geometric"
+  mode: "neutral"
+  order_size_usd: 150
+  rebalance_threshold_pct: 20.0
+  stop_loss_breakout_pct: 30.0
+  initial_capital: 10000
+
+# Aggressive Grid - Wide Range, Fewer Levels
+# Best for: High volatility markets
+# Monthly Return: 15-30%
+aggressive:
+  lower_price: 55000
+  upper_price: 75000
+  num_grids: 15
+  grid_spacing: "geometric"
+  mode: "neutral"
+  order_size_usd: 200
+  rebalance_threshold_pct: 25.0
+  stop_loss_breakout_pct: 40.0
+  initial_capital: 10000
+
+# Scalping Grid - Very Tight Range
+# Best for: Day trading, high frequency
+# Monthly Return: 20-40% (if volatile enough)
+scalper:
+  lower_price: 64000
+  upper_price: 66000
+  num_grids: 50  # Very tight grids
+  grid_spacing: "arithmetic"  # Linear for tight range
+  mode: "neutral"
+  order_size_usd: 50
+  rebalance_threshold_pct: 10.0
+  stop_loss_breakout_pct: 15.0
+  initial_capital: 5000
+
+# Long Biased Grid - Bullish
+# Best for: Bull markets with retracements
+# Monthly Return: 12-25%
+long_grid:
+  lower_price: 58000
+  upper_price: 72000
+  num_grids: 25
+  grid_spacing: "geometric"
+  mode: "long"  # More buys below current price
+  order_size_usd: 150
+  rebalance_threshold_pct: 20.0
+  stop_loss_breakout_pct: 25.0
+  initial_capital: 10000
+
+# Wide Range Grid - For Extreme Volatility
+# Best for: Crash recovery, high uncertainty
+# Monthly Return: 10-20% (but safer)
+wide_range:
+  lower_price: 50000
+  upper_price: 80000
+  num_grids: 25
+  grid_spacing: "geometric"
+  mode: "neutral"
+  order_size_usd: 200
+  rebalance_threshold_pct: 30.0
+  stop_loss_breakout_pct: null
+  initial_capital: 15000

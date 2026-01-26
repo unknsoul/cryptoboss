@@ -1,0 +1,53 @@
+# Market Making Configuration Presets
+
+# Conservative MM - Tight spread, careful inventory
+conservative:
+  base_spread_bps: 15.0  # 0.15%
+  num_levels: 3
+  level_spacing_bps: 10.0
+  order_size: 0.005
+  inventory_target: 0.0
+  max_inventory: 0.5
+  skew_factor: 0.7
+  volatility_multiplier: 1.5
+  maker_rebate_bps: 1.0
+  initial_capital: 10000
+
+# Balanced MM - Standard market making
+balanced:
+  base_spread_bps: 10.0  # 0.10%
+  num_levels: 5
+  level_spacing_bps: 5.0
+  order_size: 0.01
+  inventory_target: 0.0
+  max_inventory: 1.0
+  skew_factor: 0.5
+  volatility_multiplier: 2.0
+  maker_rebate_bps: 1.0
+  initial_capital: 10000
+
+# Aggressive MM - Tight spread, deep book
+aggressive:
+  base_spread_bps: 5.0  # 0.05%
+  num_levels: 10
+  level_spacing_bps: 3.0
+  order_size: 0.02
+  inventory_target: 0.0
+  max_inventory: 2.0
+  skew_factor: 0.3
+  volatility_multiplier: 3.0
+  maker_rebate_bps: 2.0
+  initial_capital: 20000
+
+# High Frequency MM
+hft:
+  base_spread_bps: 3.0
+  num_levels: 15
+  level_spacing_bps: 2.0
+  order_size: 0.01
+  inventory_target: 0.0
+  max_inventory: 1.5
+  skew_factor: 0.2
+  volatility_multiplier: 4.0
+  maker_rebate_bps: 2.0
+  initial_capital: 15000

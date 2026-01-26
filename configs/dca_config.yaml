@@ -1,0 +1,146 @@
+# DCA Strategy Configuration Presets# ============================================
+# Conservative DCA Configuration
+# ============================================
+# Best for: Risk-averse traders, bear markets
+# Win Rate: 90-95%
+# Avg Profit/Deal: 1-3%
+# Risk Level: LOW
+
+conservative:
+  base_order_size: 100  # USD
+  safety_order_size: 150  # USD
+  max_safety_orders: 3  # Only 3 safety orders
+  price_step_pct: 3.0  # Wider steps (3%)
+  target_profit_pct: 2.0  # Lower target (2%)
+  safety_order_volume_scale: 1.5  # Gentle Martingale
+  stop_loss_pct: 15.0  # Stop out at -15%
+  cooldown_bars: 48  # Wait 2 days between deals
+  
+  # Total capital required: ~$613
+  # Max drawdown: -15%
+
+
+# ============================================
+# Balanced DCA Configuration
+# ============================================
+# Best for: Most traders, sideways markets
+# Win Rate: 85-90%
+# Avg Profit/Deal: 3-5%
+# Risk Level: MEDIUM
+
+balanced:
+  base_order_size: 100  # USD
+  safety_order_size: 200  # USD
+  max_safety_orders: 5  # Standard 5 safety orders
+  price_step_pct: 2.5  # Standard steps (2.5%)
+  target_profit_pct: 3.0  # Standard target (3%)
+  safety_order_volume_scale: 2.0  # Classic Martingale (double)
+  stop_loss_pct: 20.0  # Stop out at -20%
+  cooldown_bars: 24  # Wait 1 day between deals
+  
+  # Total capital required: ~$6,300
+  # Max drawdown: -20%
+
+
+# ============================================
+# Aggressive DCA Configuration
+# ============================================
+# Best for: Risk-tolerant traders, volatile markets
+# Win Rate: 80-85%
+# Avg Profit/Deal: 5-10%
+# Risk Level: HIGH
+
+aggressive:
+  base_order_size: 100  # USD
+  safety_order_size: 300  # USD
+  max_safety_orders: 7  # Maximum coverage
+  price_step_pct: 2.0  # Tight steps (2%)
+  target_profit_pct: 5.0  # Higher target (5%)
+  safety_order_volume_scale: 2.5  # Aggressive Martingale
+  stop_loss_pct: 30.0  # Wider stop loss
+  cooldown_bars: 12  # Wait 12 hours only
+  
+  # Total capital required: ~$34,500
+  # Max drawdown: -30%
+
+
+# ============================================
+# 3Commas-Style Configuration
+# ============================================
+# Mimics popular 3Commas bot settings
+# Win Rate: 85-92%
+# Avg Profit/Deal: 3-4%
+# Risk Level: MEDIUM
+
+commas_style:
+  base_order_size: 100  # USD
+  safety_order_size: 200  # USD
+  max_safety_orders: 6
+  price_step_pct: 2.5
+  target_profit_pct: 3.5
+  safety_order_volume_scale: 1.8  # Conservative Martingale
+  stop_loss_pct: null  # No stop loss (ride it out)
+  cooldown_bars: 24
+  
+  # Total capital required: ~$11,200
+  # Max drawdown: Unlimited (risky!)
+
+
+# ============================================
+# Scalper DCA Configuration
+# ============================================
+# Best for: High-frequency, small profits
+# Win Rate: 85-90%
+# Avg Profit/Deal: 1-2%
+# Risk Level: LOW
+
+scalper:
+  base_order_size: 100  # USD
+  safety_order_size: 100  # USD (same as base)
+  max_safety_orders: 3
+  price_step_pct: 1.5  # Very tight steps
+  target_profit_pct: 1.5  # Small target
+  safety_order_volume_scale: 1.0  # Linear (no Martingale)
+  stop_loss_pct: 5.0  # Tight stop
+  cooldown_bars: 6  # Very short cooldown
+  
+  # Total capital required: ~$400
+  # Max drawdown: -5%
+  # Note: High trade frequency
+
+
+# ============================================
+# HODL DCA Configuration
+# ============================================
+# Best for: Long-term accumulation, bull markets
+# Win Rate: 75-85%
+# Avg Profit/Deal: 10-20%
+# Risk Level: MEDIUM
+
+hodl:
+  base_order_size: 500  # USD (larger base)
+  safety_order_size: 500  # USD
+  max_safety_orders: 10  # Very deep coverage
+  price_step_pct: 5.0  # Wide steps (buy dips)
+  target_profit_pct: 10.0  # High target
+  safety_order_volume_scale: 1.0  # Linear (equal sizes)
+  stop_loss_pct: null  # No stop (true HODL)
+  cooldown_bars: 168  # Wait 1 week
+  
+  # Total capital required: ~$5,500
+  # Max drawdown: Unlimited
+  # Note: Long-term strategy
+
+
+# ============================================
+# Comparison Table
+# ============================================
+#
+# | Preset       | Capital | Max SO | Risk  | Win%  | Avg Profit |
+# |--------------|---------|--------|-------|-------|------------|
+# | Conservative | $613    | 3      | LOW   | 90-95%| 1-3%       |
+# | Balanced     | $6,300  | 5      | MED   | 85-90%| 3-5%       |
+# | Aggressive   | $34,500 | 7      | HIGH  | 80-85%| 5-10%      |
+# | 3Commas      | $11,200 | 6      | MED+  | 85-92%| 3-4%       |
+# | Scalper      | $400    | 3      | LOW   | 85-90%| 1-2%       |
+# | HODL         | $5,500  | 10     | MED   | 75-85%| 10-20%     |

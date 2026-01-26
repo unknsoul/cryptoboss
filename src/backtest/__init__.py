@@ -1,16 +1,5 @@
-"""
-Backtest module - Production-grade backtesting
-"""
-from .engine import (
-    RealBacktestEngine,
-    BacktestResult,
-    Trade,
-    SlippageModel
-)
+"""Backtest Module."""
 
-__all__ = [
-    'RealBacktestEngine',
-    'BacktestResult',
-    'Trade',
-    'SlippageModel'
-]
+from .engine import SimpleBacktest, BacktestResult, Trade
+
+__all__ = ["SimpleBacktest", "BacktestResult", "Trade"]

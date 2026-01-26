@@ -1,6 +1,7 @@
 """
-Exchange module
+Exchange Module
 """
-from .base import ExchangeInterface, MockExchange, BinanceExchange, get_exchange
 
-__all__ = ['ExchangeInterface', 'MockExchange', 'BinanceExchange', 'get_exchange']
+from .binance_client import BinanceClient, create_binance_client
+
+__all__ = ["BinanceClient", "create_binance_client"]

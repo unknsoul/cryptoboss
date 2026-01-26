@@ -1,0 +1,52 @@
+# On-Chain Analytics Configuration
+
+# API Keys (get from respective providers)
+glassnode:
+  api_key: "YOUR_GLASSNODE_API_KEY"  # https://glassnode.com (Premium)
+  metrics:
+    - exchange_flows
+    - utxo_age
+    - miner_revenue
+    - sopr  # Spent Output Profit Ratio
+    - nupl  # Net Unrealized Profit/Loss
+
+cryptoquant:
+  api_key: "YOUR_CRYPTOQUANT_API_KEY"  # https://cryptoquant.com
+  metrics:
+    - exchange_inflow
+    - exchange_outflow
+    - reserve_risk
+    - puell_multiple
+
+etherscan:
+  api_key: "YOUR_ETHERSCAN_API_KEY"  # https://etherscan.io (Free tier available)
+
+# Whale Tracking
+whale_tracking:
+  min_btc_threshold: 1000  # Minimum BTC for whale transaction
+  update_interval_minutes: 15
+  alert_on_movement: true
+
+# Signal Thresholds
+exchange_flow_thresholds:
+  strong_bearish: 15000  # > 15k BTC into exchanges
+  moderate_bearish: 10000
+  neutral: [-10000, 10000]
+  moderate_bullish: -10000
+  strong_bullish: -15000  # > 15k BTC out of exchanges
+
+# Stablecoin Monitoring
+stablecoin_metrics:
+  tracked_coins:
+    - USDT
+    - USDC
+    - BUSD
+    - DAI
+  supply_change_threshold_pct: 5.0  # Alert if >5% change in 30 days
+
+# Update Frequencies
+update_intervals:
+  exchange_flows: 3600  # 1 hour
+  whale_movements: 900  # 15 minutes
+  utxo_age: 86400  # 1 day
+  stablecoin_supply: 21600  # 6 hours

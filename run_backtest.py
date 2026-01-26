@@ -1,203 +1,173 @@
+#!/usr/bin/env python3
 """
-Professional Trading Bot - Enhanced Main Execution
-Multiple strategies, advanced analytics, walk-forward validation
+CryptoBoss Backtest Runner
+
+Run backtests using the new architecture.
+
+Usage:
+    python run_backtest.py
+    python run_backtest.py --strategy=dca --capital=10000
 """
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
-import os
+import argparse
+from pathlib import Path
 
-# Add core to path
-sys.path.insert(0, os.path.dirname(__file__))
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent))
 
-from core.strategy import SimpleTrendStrategy
-from core.backtest import EnhancedBacktest
-from core.testing.walk_forward import WalkForwardAnalysis
-from core.testing.monte_carlo import MonteCarloSimulation
+from src.backtest import SimpleBacktest
+from src.strategies.dca_strategy import DCAStrategy
 
 
-def load_data(filepath="data/btc_1h.csv"):
-    """Load BTC data"""
+def load_data(filepath: str = "data/btc_1h.csv") -> pd.DataFrame:
+    """Load historical data."""
     try:
         df = pd.read_csv(filepath)
+        
+        # Ensure proper column names
+        df.columns = [c.lower() for c in df.columns]
+        
+        # Set datetime index if available
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df.set_index('timestamp', inplace=True)
+        elif 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+            df.set_index('date', inplace=True)
+        
+        print(f"✅ Loaded {len(df)} rows from {filepath}")
         return df
     except FileNotFoundError:
         print(f"❌ Error: {filepath} not found")
+        print("   Run: python download_data.py to download data")
         sys.exit(1)
 
 
-def run_single_backtest(df, strategy, capital=10000):
-    """Run a single backtest"""
+def run_dca_backtest(df: pd.DataFrame, capital: float = 10000) -> dict:
+    """Run DCA strategy backtest."""
+    print("\n" + "=" * 60)
+    print("  DCA STRATEGY BACKTEST")
+    print("=" * 60)
     
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    volumes = df.get("volume", pd.Series([0]*len(df))).values
-    
-    # Create backtest engine
-    bt = EnhancedBacktest(
-        capital=capital,
-        risk_per_trade=0.02,          # 2% risk per trade
-        fee=0.001,                     # 0.1% fee
-        slippage=0.0005,               # 0.05% slippage
-        max_drawdown_limit=0.25,       # Halt at 25% drawdown
-        daily_loss_limit=0.05,         # Max 5% daily loss
-        cooldown_after_losses=3        # Cooldown after 3 losses
+    # Create strategy
+    strategy = DCAStrategy(
+        base_order_size=capital * 0.02,      # 2% base order
+        safety_order_size=capital * 0.04,    # 4% safety orders
+        max_safety_orders=5,
+        price_step_pct=2.5,
+        target_profit_pct=2.0,
+        safety_order_volume_scale=1.5,
+        stop_loss_pct=15.0
     )
     
+    print(f"\nConfig:")
+    print(f"  Base Order: ${strategy.base_order_size:.2f}")
+    print(f"  Safety Order: ${strategy.safety_order_size:.2f}")
+    print(f"  Max Safety Orders: {strategy.max_safety_orders}")
+    print(f"  Price Deviation: {strategy.price_step_pct}%")
+    print(f"  Target Profit: {strategy.target_profit_pct}%")
+    print(f"  Max Capital Required: ${strategy.calculate_total_investment():,.2f}")
+    
     # Run backtest
-    print("Running backtest...")
-    equity = bt.run(highs, lows, closes, strategy, volumes=volumes)
-    metrics = bt.get_metrics()
+    bt = SimpleBacktest(capital=capital, fee_rate=0.001, slippage_bps=5)
+    result = bt.run(df, strategy)
     
-    return bt, equity, metrics
+    # Print results
+    print(f"\n📊 RESULTS")
+    print(f"  Initial Capital:   ${result.initial_capital:,.2f}")
+    print(f"  Final Capital:     ${result.final_capital:,.2f}")
+    print(f"  Total Return:      ${result.total_return:,.2f} ({result.total_return_pct:+.2f}%)")
+    print(f"\n📈 PERFORMANCE")
+    print(f"  Total Trades:      {result.num_trades}")
+    print(f"  Win Rate:          {result.win_rate:.1f}%")
+    print(f"  Avg Win:           ${result.avg_win:,.2f}")
+    print(f"  Avg Loss:          ${result.avg_loss:,.2f}")
+    print(f"  Max Drawdown:      {result.max_drawdown_pct:.2f}%")
+    print(f"  Sharpe Ratio:      {result.sharpe_ratio:.2f}")
+    print(f"  Profit Factor:     {result.profit_factor:.2f}")
+    
+    # Strategy-specific metrics
+    metrics = strategy.get_metrics()
+    print(f"\n🔄 DCA METRICS")
+    print(f"  Total Deals:       {metrics.get('total_deals', 0)}")
+    print(f"  Avg Safety Orders: {metrics.get('avg_safety_orders_used', 0):.1f}")
+    
+    return {
+        'result': result,
+        'strategy': strategy,
+        'metrics': metrics
+    }
 
 
-def print_metrics(metrics, initial_capital, buy_hold_return):
-    """Print comprehensive metrics"""
-    
-    print("\n" + "=" * 80)
-    print("PERFORMANCE METRICS")
-    print("=" * 80)
-    
-    print(f"\n💰 RETURNS")
-    print(f"  Initial Capital:       ${initial_capital:>12,.2f}")
-    print(f"  Final Equity:          ${metrics.get('final_equity', 0):>12,.2f}")
-    print(f"  Total Return:          {metrics.get('total_return', 0):>12.2%}")
-    print(f"  Buy & Hold Return:     {buy_hold_return:>12.2%}")
-    
-    print(f"\n📊 RISK METRICS")
-    print(f"  Sharpe Ratio:          {metrics.get('sharpe_ratio', 0):>12.2f}")
-    print(f"  Sortino Ratio:         {metrics.get('sortino_ratio', 0):>12.2f}")
-    print(f"  Max Drawdown:          {metrics.get('max_drawdown', 0):>12.2%}")
-    
-    print(f"\n📈 TRADING METRICS")
-    print(f"  Number of Trades:      {metrics.get('num_trades', 0):>12}")
-    print(f"  Win Rate:              {metrics.get('win_rate', 0):>12.2%}")
-    print(f"  Average Win:           ${metrics.get('avg_win', 0):>12,.2f}")
-    print(f"  Average Loss:          ${metrics.get('avg_loss', 0):>12,.2f}")
-    print(f"  Expectancy:            ${metrics.get('expectancy', 0):>12,.2f}")
-    print(f"  Profit Factor:         {metrics.get('profit_factor', 0):>12.2f}")
-    print(f"  Avg Duration (hours):  {metrics.get('avg_duration_hours', 0):>12.1f}")
-    
-    # Exit reasons
-    if metrics.get('exit_reasons'):
-        print(f"\n📋 EXIT REASONS")
-        for reason, count in metrics['exit_reasons'].items():
-            print(f"  {reason:<20s}: {count:>4}")
-    
-    # Risk warnings
-    if metrics.get('trading_halted'):
-        print(f"\n⚠️  WARNING: Trading was halted due to risk limits")
-
-
-def plot_results(equity, buy_hold, trades, filename='backtest_results.png'):
-    """Create comprehensive visualization"""
-    
-    fig, axes = plt.subplots(3, 1, figsize=(16, 12))
+def plot_results(result, df: pd.DataFrame, save_path: str = "backtest_results.png"):
+    """Plot backtest results."""
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
     
     # Equity curve
     ax1 = axes[0]
-    ax1.plot(equity, label="Strategy", linewidth=2, color='#2E86AB')
-    ax1.plot(buy_hold, label="Buy & Hold", linestyle="--", alpha=0.7, color='#A23B72')
-    ax1.set_ylabel("Equity ($)", fontsize=11)
-    ax1.set_title("Professional BTC Trading Bot - Equity Curve", fontsize=14, fontweight='bold')
-    ax1.legend(loc='upper left', fontsize=10)
+    ax1.plot(result.equity_curve, label='Strategy Equity', color='blue', linewidth=1.5)
+    ax1.axhline(y=result.initial_capital, color='gray', linestyle='--', alpha=0.5, label='Initial Capital')
+    ax1.set_title('Equity Curve', fontsize=14)
+    ax1.set_xlabel('Bar')
+    ax1.set_ylabel('Equity ($)')
+    ax1.legend()
     ax1.grid(True, alpha=0.3)
     
-    # Drawdown
+    # Price with trades
     ax2 = axes[1]
-    equity_array = np.array(equity)
-    peak = np.maximum.accumulate(equity_array)
-    drawdown = (peak - equity_array) / peak
-    ax2.fill_between(range(len(drawdown)), 0, -drawdown * 100, color='#E63946', alpha=0.3)
-    ax2.plot(-drawdown * 100, color='#E63946', linewidth=1)
-    ax2.set_ylabel("Drawdown (%)", fontsize=11)
-    ax2.set_title("Drawdown Over Time", fontsize=12, fontweight='bold')
+    ax2.plot(df['close'].values, label='BTC Price', color='gray', alpha=0.7)
+    
+    # Mark trades
+    for trade in result.trades:
+        if hasattr(trade, 'entry_time') and trade.entry_price:
+            color = 'green' if trade.pnl > 0 else 'red'
+            # Just plot entry points for simplicity
+            ax2.axhline(y=trade.entry_price, color=color, alpha=0.3, linewidth=0.5)
+    
+    ax2.set_title('Price Chart with Trades', fontsize=14)
+    ax2.set_xlabel('Bar')
+    ax2.set_ylabel('Price ($)')
+    ax2.legend()
     ax2.grid(True, alpha=0.3)
     
-    # Trade distribution
-    ax3 = axes[2]
-    if trades:
-        pnls = [t['pnl'] for t in trades]
-        colors = ['#06D6A0' if pnl > 0 else '#E63946' for pnl in pnls]
-        ax3.bar(range(len(pnls)), pnls, color=colors, alpha=0.7)
-        ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
-        ax3.set_ylabel("PnL ($)", fontsize=11)
-        ax3.set_xlabel("Trade Number", fontsize=11)
-        ax3.set_title("Trade PnL Distribution", fontsize=12, fontweight='bold')
-        ax3.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    plt.savefig(filename, dpi=150, bbox_inches='tight')
-    print(f"\n📊 Chart saved to: {filename}")
+    plt.savefig(save_path, dpi=150)
+    print(f"\n📊 Chart saved to {save_path}")
+    plt.show()
 
 
 def main():
-    print("=" * 80)
-    print("PROFESSIONAL BTC TRADING BOT - ENHANCED BACKTEST")
-    print("=" * 80)
-    print()
+    parser = argparse.ArgumentParser(description="CryptoBoss Backtest Runner")
+    parser.add_argument("--data", default="data/btc_1h.csv", help="Data file path")
+    parser.add_argument("--capital", type=float, default=10000, help="Starting capital")
+    parser.add_argument("--strategy", choices=["dca", "grid"], default="dca", help="Strategy")
+    parser.add_argument("--no-plot", action="store_true", help="Skip plotting")
+    args = parser.parse_args()
     
     # Load data
-    print("Loading BTC data...")
-    df = load_data("data/btc_1h.csv")
-    print(f"✅ Loaded {len(df)} hourly candles")
-    print(f"   Period: {df.iloc[0].get('timestamp', 'N/A')} to {df.iloc[-1].get('timestamp', 'N/A')}")
-    
-    # Initialize strategy
-    print("\nInitializing Simple Trend Strategy...")
-    strategy = SimpleTrendStrategy(
-        ema_fast=50,
-        ema_slow=200,
-        donchian_period=20,
-        atr_period=14,
-        atr_multiplier=2.0
-    )
+    df = load_data(args.data)
     
     # Run backtest
-    initial_capital = 10000
-    bt, equity, metrics = run_single_backtest(df, strategy, capital=initial_capital)
+    if args.strategy == "dca":
+        output = run_dca_backtest(df, args.capital)
+    else:
+        print(f"Strategy {args.strategy} not yet implemented in backtest")
+        return
     
-    # Calculate buy & hold
-    closes = df["close"].values
-    buy_hold_return = (closes[-1] / closes[0]) - 1
-    buy_hold = (closes / closes[0]) * initial_capital
+    # Plot
+    if not args.no_plot:
+        try:
+            plot_results(output['result'], df)
+        except Exception as e:
+            print(f"⚠️ Could not plot: {e}")
     
-    # Print metrics
-    print_metrics(metrics, initial_capital, buy_hold_return)
-    
-    # Plot results
-    plot_results(equity, buy_hold, bt.trades, 'backtest_results.png')
-    
-    # Walk-forward analysis
-    print("\n" + "=" * 80)
-    print("WALK-FORWARD ANALYSIS")
-    print("=" * 80)
-    
-    wf = WalkForwardAnalysis(train_ratio=0.7, num_windows=None)
-    wf_results = wf.run_analysis(
-        bt, strategy,
-        df["high"].values, df["low"].values, df["close"].values,
-        volumes=df.get("volume", pd.Series([0]*len(df))).values
-    )
-    wf.print_summary(wf_results)
-    
-    # Monte Carlo simulation
-    if bt.trades:
-        print("\n" + "=" * 80)
-        print("MONTE CARLO SIMULATION")
-        print("=" * 80)
-        
-        mc = MonteCarloSimulation(num_simulations=1000)
-        mc_results = mc.run_simulation(bt.trades, initial_capital)
-        mc.print_results(mc_results, initial_capital)
-    
-    print("\n" + "=" * 80)
-    print("✅ BACKTEST COMPLETE")
-    print("=" * 80)
+    print("\n" + "=" * 60)
+    print("  BACKTEST COMPLETE")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
