@@ -34,6 +34,34 @@ from .decision_logger import (
     DecisionLogger, DecisionLog, DecisionType, get_decision_logger
 )
 
+# === Phase 6: Live Readiness Hardening ===
+from .context_state_machine import (
+    ContextStateMachine, ContextState, ContextTransitionEvent,
+    ContextStateSnapshot, get_context_state_machine, VALID_TRANSITIONS
+)
+from .risk_state_persistence import (
+    RiskStatePersistence, PersistedRiskState, get_risk_persistence
+)
+from .trade_budget_manager import (
+    TradeBudgetManager, BudgetLimits, BudgetStatus, BudgetType,
+    get_budget_manager
+)
+from .proposal_scorer import (
+    ProposalScorer, ScoredProposal, StrategyHealth, get_proposal_scorer
+)
+from .exchange_health_monitor import (
+    ExchangeHealthMonitor, ExchangeHealthSnapshot, HealthLevel,
+    get_exchange_monitor
+)
+from .cold_start_controller import (
+    ColdStartController, ColdStartPhase, ColdStartStatus,
+    get_cold_start_controller, reset_cold_start_controller
+)
+from .replay_engine import (
+    DeterministicReplayEngine, ReplaySession, ReplayEvent, ReplayDecision,
+    ReplayMismatch, get_replay_engine
+)
+
 # === Phase 1: Core Stability ===
 from .exchange_state import ExchangeStateManager, get_exchange_state, OpenOrder
 from .portfolio_risk import PortfolioRiskModel, get_portfolio_risk, RiskMetrics
@@ -71,6 +99,20 @@ __all__ = [
     "get_permission_filter",
     "DecisionLogger", "DecisionLog", "DecisionType", "get_decision_logger",
     
+    # Phase 6: Live Readiness Hardening
+    "ContextStateMachine", "ContextState", "ContextTransitionEvent",
+    "ContextStateSnapshot", "get_context_state_machine", "VALID_TRANSITIONS",
+    "RiskStatePersistence", "PersistedRiskState", "get_risk_persistence",
+    "TradeBudgetManager", "BudgetLimits", "BudgetStatus", "BudgetType",
+    "get_budget_manager",
+    "ProposalScorer", "ScoredProposal", "StrategyHealth", "get_proposal_scorer",
+    "ExchangeHealthMonitor", "ExchangeHealthSnapshot", "HealthLevel",
+    "get_exchange_monitor",
+    "ColdStartController", "ColdStartPhase", "ColdStartStatus",
+    "get_cold_start_controller", "reset_cold_start_controller",
+    "DeterministicReplayEngine", "ReplaySession", "ReplayEvent", "ReplayDecision",
+    "ReplayMismatch", "get_replay_engine",
+    
     # Phase 1
     "ExchangeStateManager", "get_exchange_state", "OpenOrder",
     "PortfolioRiskModel", "get_portfolio_risk", "RiskMetrics",
@@ -88,3 +130,4 @@ __all__ = [
     # Phase 3
     "IntegratedTaxTracker", "get_tax_tracker",
 ]
+
