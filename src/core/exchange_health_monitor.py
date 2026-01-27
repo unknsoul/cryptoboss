@@ -1,5 +1,5 @@
 """
-Exchange Health Monitor - Live Readiness Component
+Exchange Health Monitor - Live Readiness Component (v10.0)
 
 Monitors exchange connectivity and performance:
 - API latency
@@ -7,7 +7,11 @@ Monitors exchange connectivity and performance:
 - Partial fill ratio
 - WebSocket lag
 
-Disables execution on degradation, requires manual recovery.
+v10.0 Feature: 4-Stage Graduated Escalation
+- NORMAL: Full trading
+- DEGRADED_REDUCED_SIZE: 50% size reduction
+- DEGRADED_NO_NEW_TRADES: Close-only mode
+- HALTED: Full halt, manual recovery required
 """
 
 import logging
@@ -28,6 +32,23 @@ class HealthLevel(Enum):
     UNKNOWN = "unknown"
 
 
+class EscalationStage(Enum):
+    """v10.0 Graduated escalation stages."""
+    NORMAL = "normal"                           # Full trading allowed
+    DEGRADED_REDUCED_SIZE = "degraded_reduced"  # 50% size reduction
+    DEGRADED_NO_NEW_TRADES = "degraded_close"   # Close-only mode
+    HALTED = "halted"                           # Full halt
+
+
+# Stage transition rules
+ESCALATION_ORDER = [
+    EscalationStage.NORMAL,
+    EscalationStage.DEGRADED_REDUCED_SIZE,
+    EscalationStage.DEGRADED_NO_NEW_TRADES,
+    EscalationStage.HALTED
+]
+
+
 @dataclass
 class OrderMetrics:
     """Metrics for a single order."""
@@ -41,10 +62,14 @@ class OrderMetrics:
 
 @dataclass
 class ExchangeHealthSnapshot:
-    """Current health status snapshot."""
+    """Current health status snapshot with escalation stage."""
     timestamp: datetime
     health_level: HealthLevel
     health_score: float  # 0.0 to 1.0
+    
+    # v10.0: Escalation stage
+    escalation_stage: EscalationStage
+    stage_since: datetime
     
     # Metrics
     avg_latency_ms: float
@@ -56,6 +81,11 @@ class ExchangeHealthSnapshot:
     consecutive_failures: int
     last_successful_order: Optional[datetime]
     
+    # Stage-specific status
+    new_trades_allowed: bool
+    close_only_mode: bool
+    size_multiplier: float
+    
     # Status
     execution_allowed: bool
     requires_manual_recovery: bool
@@ -66,11 +96,16 @@ class ExchangeHealthSnapshot:
             'timestamp': self.timestamp.isoformat(),
             'health_level': self.health_level.value,
             'health_score': self.health_score,
+            'escalation_stage': self.escalation_stage.value,
+            'stage_since': self.stage_since.isoformat(),
             'avg_latency_ms': self.avg_latency_ms,
             'order_rejection_rate': self.order_rejection_rate,
             'partial_fill_ratio': self.partial_fill_ratio,
             'websocket_lag_ms': self.websocket_lag_ms,
             'consecutive_failures': self.consecutive_failures,
+            'new_trades_allowed': self.new_trades_allowed,
+            'close_only_mode': self.close_only_mode,
+            'size_multiplier': self.size_multiplier,
             'execution_allowed': self.execution_allowed,
             'requires_manual_recovery': self.requires_manual_recovery,
             'issues': self.issues
@@ -132,6 +167,11 @@ class ExchangeHealthMonitor:
         self._last_successful_order: Optional[datetime] = None
         self._requires_manual_recovery: bool = False
         self._recovery_requested_at: Optional[datetime] = None
+        
+        # v10.0: Escalation tracking
+        self._current_stage: EscalationStage = EscalationStage.NORMAL
+        self._stage_since: datetime = datetime.now()
+        self._stage_cooldowns: Dict[EscalationStage, datetime] = {}
         
         logger.info(f"ExchangeHealthMonitor initialized (window_size={window_size})")
     
@@ -213,12 +253,17 @@ class ExchangeHealthMonitor:
                 timestamp=now,
                 health_level=HealthLevel.UNKNOWN,
                 health_score=0.5,
+                escalation_stage=self._current_stage,
+                stage_since=self._stage_since,
                 avg_latency_ms=0.0,
                 order_rejection_rate=0.0,
                 partial_fill_ratio=0.0,
                 websocket_lag_ms=self._websocket_lag_ms,
                 consecutive_failures=self._consecutive_failures,
                 last_successful_order=self._last_successful_order,
+                new_trades_allowed=True,
+                close_only_mode=False,
+                size_multiplier=1.0,
                 execution_allowed=not self._requires_manual_recovery,
                 requires_manual_recovery=self._requires_manual_recovery,
                 issues=["No order history"]
@@ -282,20 +327,74 @@ class ExchangeHealthMonitor:
             not self._requires_manual_recovery
         )
         
+        # v10.0: Determine escalation stage based on health level
+        self._update_escalation_stage(health_level, issues)
+        
+        # Stage-specific behavior
+        new_trades_allowed = self._current_stage in [
+            EscalationStage.NORMAL,
+            EscalationStage.DEGRADED_REDUCED_SIZE
+        ]
+        close_only_mode = self._current_stage == EscalationStage.DEGRADED_NO_NEW_TRADES
+        size_mult = self._get_stage_size_multiplier()
+        
         return ExchangeHealthSnapshot(
             timestamp=now,
             health_level=health_level,
             health_score=health_score,
+            escalation_stage=self._current_stage,
+            stage_since=self._stage_since,
             avg_latency_ms=avg_latency,
             order_rejection_rate=rejection_rate,
             partial_fill_ratio=partial_rate,
             websocket_lag_ms=self._websocket_lag_ms,
             consecutive_failures=self._consecutive_failures,
             last_successful_order=self._last_successful_order,
+            new_trades_allowed=new_trades_allowed,
+            close_only_mode=close_only_mode,
+            size_multiplier=size_mult,
             execution_allowed=execution_allowed,
             requires_manual_recovery=self._requires_manual_recovery,
             issues=issues
         )
+    
+    def _update_escalation_stage(self, health_level: HealthLevel, issues: List[str]):
+        """v10.0: Update escalation stage based on conditions."""
+        critical_count = sum(1 for i in issues if "CRITICAL" in i)
+        warning_count = sum(1 for i in issues if "WARNING" in i)
+        
+        # Determine target stage
+        if self._requires_manual_recovery or critical_count >= 2:
+            target_stage = EscalationStage.HALTED
+        elif critical_count >= 1:
+            target_stage = EscalationStage.DEGRADED_NO_NEW_TRADES
+        elif warning_count >= 2:
+            target_stage = EscalationStage.DEGRADED_REDUCED_SIZE
+        elif warning_count >= 1 and self._current_stage == EscalationStage.NORMAL:
+            target_stage = EscalationStage.DEGRADED_REDUCED_SIZE
+        elif warning_count == 0 and critical_count == 0:
+            target_stage = EscalationStage.NORMAL
+        else:
+            target_stage = self._current_stage
+        
+        # Check if stage changed
+        if target_stage != self._current_stage:
+            old_stage = self._current_stage
+            self._current_stage = target_stage
+            self._stage_since = datetime.now()
+            logger.warning(
+                f"Escalation stage changed: {old_stage.value} -> {target_stage.value}"
+            )
+    
+    def _get_stage_size_multiplier(self) -> float:
+        """v10.0: Get size multiplier for current stage."""
+        multipliers = {
+            EscalationStage.NORMAL: 1.0,
+            EscalationStage.DEGRADED_REDUCED_SIZE: 0.5,
+            EscalationStage.DEGRADED_NO_NEW_TRADES: 0.0,
+            EscalationStage.HALTED: 0.0
+        }
+        return multipliers.get(self._current_stage, 0.0)
     
     def request_recovery(self) -> bool:
         """

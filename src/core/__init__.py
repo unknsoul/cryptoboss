@@ -51,7 +51,7 @@ from .proposal_scorer import (
 )
 from .exchange_health_monitor import (
     ExchangeHealthMonitor, ExchangeHealthSnapshot, HealthLevel,
-    get_exchange_monitor
+    EscalationStage, ESCALATION_ORDER, get_exchange_monitor
 )
 from .cold_start_controller import (
     ColdStartController, ColdStartPhase, ColdStartStatus,
@@ -60,6 +60,20 @@ from .cold_start_controller import (
 from .replay_engine import (
     DeterministicReplayEngine, ReplaySession, ReplayEvent, ReplayDecision,
     ReplayMismatch, get_replay_engine
+)
+
+# === Phase 7: Production Finalization v10.0 ===
+from .scoring_contract import (
+    ScoringContract, ContractValidatedProposal, ScoreBreakdown,
+    ScoreComponent, COMPONENT_WEIGHTS, get_scoring_contract
+)
+from .ml_containment import (
+    MLContainmentManager, MLFeatureOutput, MLInfluenceLog,
+    MLOutputType, MLContainmentError, get_ml_containment
+)
+from .capital_governor import (
+    CapitalAllocationGovernor, AllocationSnapshot, AllocationContext,
+    DEFAULT_CONTEXT_ALLOCATIONS, get_capital_governor
 )
 
 # === Phase 1: Core Stability ===
@@ -107,11 +121,19 @@ __all__ = [
     "get_budget_manager",
     "ProposalScorer", "ScoredProposal", "StrategyHealth", "get_proposal_scorer",
     "ExchangeHealthMonitor", "ExchangeHealthSnapshot", "HealthLevel",
-    "get_exchange_monitor",
+    "EscalationStage", "ESCALATION_ORDER", "get_exchange_monitor",
     "ColdStartController", "ColdStartPhase", "ColdStartStatus",
     "get_cold_start_controller", "reset_cold_start_controller",
     "DeterministicReplayEngine", "ReplaySession", "ReplayEvent", "ReplayDecision",
     "ReplayMismatch", "get_replay_engine",
+    
+    # Phase 7: Production Finalization v10.0
+    "ScoringContract", "ContractValidatedProposal", "ScoreBreakdown",
+    "ScoreComponent", "COMPONENT_WEIGHTS", "get_scoring_contract",
+    "MLContainmentManager", "MLFeatureOutput", "MLInfluenceLog",
+    "MLOutputType", "MLContainmentError", "get_ml_containment",
+    "CapitalAllocationGovernor", "AllocationSnapshot", "AllocationContext",
+    "DEFAULT_CONTEXT_ALLOCATIONS", "get_capital_governor",
     
     # Phase 1
     "ExchangeStateManager", "get_exchange_state", "OpenOrder",

@@ -113,15 +113,19 @@ class TradePermissionFilter:
         bias: BiasState,
         direction: str,
         orderbook: Optional[Dict] = None,
+        proposal: Optional[Dict] = None,  # v10.0: Proposal-aware
     ) -> PermissionResult:
         """
         Check if new trade is permitted.
+        
+        v10.0: Now validates the selected proposal.
         
         Args:
             context: Current market context
             bias: Current directional bias
             direction: Proposed trade direction ('LONG' or 'SHORT')
             orderbook: Current orderbook snapshot
+            proposal: Optional validated proposal to check
             
         Returns:
             PermissionResult with approval status and reasoning
