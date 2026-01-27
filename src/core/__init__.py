@@ -76,6 +76,16 @@ from .capital_governor import (
     DEFAULT_CONTEXT_ALLOCATIONS, get_capital_governor
 )
 
+# === Phase 8: v10.1-FINAL Zero Bypass ===
+from .bias_pre_filter import (
+    BiasPreFilter, BiasFilterResult, FilteredProposal,
+    FilterReason, get_bias_pre_filter
+)
+from .execution_flow import (
+    ExecutionFlowOrchestrator, FlowResult, FlowStage, FlowStatus,
+    StageResult, STAGE_ORDER, STAGE_NAMES, get_execution_flow
+)
+
 # === Phase 1: Core Stability ===
 from .exchange_state import ExchangeStateManager, get_exchange_state, OpenOrder
 from .portfolio_risk import PortfolioRiskModel, get_portfolio_risk, RiskMetrics
@@ -134,6 +144,12 @@ __all__ = [
     "MLOutputType", "MLContainmentError", "get_ml_containment",
     "CapitalAllocationGovernor", "AllocationSnapshot", "AllocationContext",
     "DEFAULT_CONTEXT_ALLOCATIONS", "get_capital_governor",
+    
+    # Phase 8: v10.1-FINAL Zero Bypass
+    "BiasPreFilter", "BiasFilterResult", "FilteredProposal",
+    "FilterReason", "get_bias_pre_filter",
+    "ExecutionFlowOrchestrator", "FlowResult", "FlowStage", "FlowStatus",
+    "StageResult", "STAGE_ORDER", "STAGE_NAMES", "get_execution_flow",
     
     # Phase 1
     "ExchangeStateManager", "get_exchange_state", "OpenOrder",

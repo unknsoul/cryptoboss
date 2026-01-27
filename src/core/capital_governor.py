@@ -264,6 +264,62 @@ class CapitalAllocationGovernor:
         
         return True, "Trade size within allocation limits"
     
+    def veto_trade(
+        self,
+        proposed_size: float,
+        context: str,
+        volatility_percentile: float = 50.0,
+        daily_drawdown_pct: float = 0.0,
+        exchange_health: float = 1.0
+    ) -> tuple[bool, str, float]:
+        """
+        v10.1-FINAL: VETO trade based on capital constraints.
+        
+        Returns: (allowed, reason, effective_size)
+        
+        If effective_size is 0, trade is VETOED.
+        """
+        # Get fresh allocation
+        allocation = self.get_allocation(
+            context=context,
+            volatility_percentile=volatility_percentile,
+            daily_drawdown_pct=daily_drawdown_pct,
+            exchange_health=exchange_health
+        )
+        
+        # VETO condition 1: NO_TRADE context
+        if allocation.context == AllocationContext.NO_TRADE:
+            logger.warning(f"Capital Governor VETO: NO_TRADE context")
+            return False, "VETO: NO_TRADE context allocates zero capital", 0.0
+        
+        # VETO condition 2: Zero effective allocation
+        if allocation.effective_allocation <= 0:
+            logger.warning(f"Capital Governor VETO: zero allocation")
+            return False, "VETO: Effective allocation is zero", 0.0
+        
+        # VETO condition 3: No available capital
+        if allocation.available_capital <= 0:
+            logger.warning(f"Capital Governor VETO: no available capital")
+            return False, "VETO: No available capital for new positions", 0.0
+        
+        # Calculate effective size
+        effective_size = min(proposed_size, allocation.available_capital)
+        
+        # VETO condition 4: Effective size too small
+        if effective_size <= 0:
+            logger.warning(f"Capital Governor VETO: effective size is zero")
+            return False, "VETO: Effective size would be zero", 0.0
+        
+        # Approved with possible reduction
+        if effective_size < proposed_size:
+            logger.info(
+                f"Capital Governor: Size reduced from ${proposed_size:,.0f} "
+                f"to ${effective_size:,.0f}"
+            )
+            return True, f"Approved with reduction to ${effective_size:,.0f}", effective_size
+        
+        return True, "Approved at full size", effective_size
+    
     def _calculate_volatility_modifier(self, vol_percentile: float) -> float:
         """Calculate allocation modifier based on volatility."""
         if vol_percentile < self.VOL_REDUCTION_THRESHOLD:
