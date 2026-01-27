@@ -2,13 +2,97 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Base styles with plain CSS fallback */
 :root {
-  --font-mono: 'JetBrains Mono', monospace;
+  --bg-primary: #0f1419;
+  --bg-secondary: #1a1f26;
+  --bg-tertiary: #242b33;
+  --border-color: #2d3640;
+  --text-primary: #e7e9ea;
+  --text-secondary: #8b98a5;
+  --text-muted: #6b7280;
+  --accent-blue: #3b82f6;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-yellow: #eab308;
+}
+
+/* Force dark theme */
+html {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 body {
-  @apply bg-bg-primary text-text-primary;
-  font-family: var(--font-mono);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+/* Ensure SVGs have proper sizing */
+svg {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Force SVG icons to respect dimensions */
+.w-5 {
+  width: 1.25rem !important;
+}
+
+.h-5 {
+  height: 1.25rem !important;
+}
+
+.w-6 {
+  width: 1.5rem !important;
+}
+
+.h-6 {
+  height: 1.5rem !important;
+}
+
+.w-2\.5 {
+  width: 0.625rem !important;
+}
+
+.h-2\.5 {
+  height: 0.625rem !important;
+}
+
+.w-2 {
+  width: 0.5rem !important;
+}
+
+.h-2 {
+  height: 0.5rem !important;
+}
+
+.w-3 {
+  width: 0.75rem !important;
+}
+
+.h-3 {
+  height: 0.75rem !important;
+}
+
+.w-10 {
+  width: 2.5rem !important;
+}
+
+.h-10 {
+  height: 2.5rem !important;
+}
+
+.w-12 {
+  width: 3rem !important;
+}
+
+.h-12 {
+  height: 3rem !important;
 }
 
 /* Custom scrollbar */
@@ -18,69 +102,14 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-bg-secondary;
+  background: var(--bg-secondary);
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-border rounded;
+  background: var(--border-color);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-text-muted;
-}
-
-/* Professional button styles */
-.btn {
-  @apply px-4 py-2 rounded font-medium transition-all duration-200;
-}
-
-.btn-primary {
-  @apply bg-accent-blue text-white hover:bg-opacity-80;
-}
-
-.btn-success {
-  @apply bg-accent-green text-white hover:bg-opacity-80;
-}
-
-.btn-danger {
-  @apply bg-accent-red text-white hover:bg-opacity-80;
-}
-
-.btn-secondary {
-  @apply bg-bg-tertiary text-text-primary hover:bg-opacity-80;
-}
-
-/* Card styles */
-.card {
-  @apply bg-bg-secondary border border-border rounded-lg p-4;
-}
-
-/* Table styles */
-.table {
-  @apply w-full text-sm;
-}
-
-.table th {
-  @apply text-left text-text-secondary font-medium py-2 px-4 border-b border-bg-border;
-}
-
-.table td {
-  @apply py-3 px-4 border-b border-border;
-}
-
-.table tr:hover {
-  @apply bg-bg-tertiary;
-}
-
-/* Status indicators */
-.status-long {
-  @apply text-accent-green;
-}
-
-.status-short {
-  @apply text-accent-red;
-}
-
-.status-neutral {
-  @apply text-text-secondary;
+  background: var(--text-muted);
 }

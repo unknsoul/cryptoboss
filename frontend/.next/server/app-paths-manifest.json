@@ -1,7 +1,13 @@
 {
   "/live/page": "app/live/page.js",
   "/page": "app/page.js",
+  "/risk/page": "app/risk/page.js",
   "/decisions/page": "app/decisions/page.js",
-  "/settings/page": "app/settings/page.js",
-  "/risk/page": "app/risk/page.js"
+  "/positions/page": "app/positions/page.js",
+  "/context/page": "app/context/page.js",
+  "/strategies/page": "app/strategies/page.js",
+  "/health/page": "app/health/page.js",
+  "/replay/page": "app/replay/page.js",
+  "/logs/page": "app/logs/page.js",
+  "/settings/page": "app/settings/page.js"
 }
