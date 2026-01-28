@@ -30,6 +30,7 @@ from src.core import (
 )
 from src.core.integration_hub import TelegramIntegration, DiscordIntegration
 from src.strategies.dca_strategy import DCAStrategy
+from src.exchange.binance_client import BinanceClient, create_binance_client
 
 # Setup logging
 logging.basicConfig(
@@ -37,6 +38,47 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(name)s - %(message)s'
 )
 logger = logging.getLogger("CryptoBoss")
+
+
+async def test_exchange_connection(testnet: bool = True) -> tuple[bool, dict]:
+    """
+    Test exchange connectivity and return status.
+    
+    Returns:
+        tuple: (success: bool, info: dict with balance/prices/error)
+    """
+    print("\n  📡 Testing Exchange Connection...")
+    
+    try:
+        client = create_binance_client(testnet=testnet)
+        await client.connect()
+        
+        # Test balance fetch
+        balance = await client.get_balance()
+        usdt_balance = balance.get("USDT", {}).get("free", 0)
+        
+        # Test price fetch
+        btc_price = await client.get_price("BTC/USDT")
+        
+        await client.close()
+        
+        info = {
+            "connected": True,
+            "testnet": testnet,
+            "usdt_balance": usdt_balance,
+            "btc_price": btc_price,
+        }
+        
+        print(f"  ✅ Connected to {'Testnet' if testnet else 'Mainnet'}")
+        print(f"  💰 USDT Balance: ${usdt_balance:,.2f}")
+        print(f"  📊 BTC Price: ${btc_price:,.2f}")
+        
+        return True, info
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"  ⚠️  Exchange connection failed: {error_msg}")
+        return False, {"connected": False, "error": error_msg}
 
 
 def parse_args():
@@ -160,10 +202,25 @@ async def main():
             logger.error("Live trading requires --env=prod")
             sys.exit(1)
     
-    # Create trading engine
+    # Test exchange connectivity
+    use_testnet = args.env != "prod"
+    connected, exchange_info = await test_exchange_connection(testnet=use_testnet)
+    
+    if not connected and args.mode == "live":
+        logger.error("Cannot proceed with live trading - exchange connection failed")
+        sys.exit(1)
+    
+    # Create Binance client for live price data
+    exchange_client = None
+    if connected:
+        exchange_client = create_binance_client(testnet=use_testnet)
+        await exchange_client.connect()
+    
+    # Create trading engine with exchange client
     engine = create_engine(
         mode=args.mode,
-        portfolio_value=args.capital
+        portfolio_value=args.capital,
+        exchange_client=exchange_client
     )
     
     # Setup strategies
@@ -179,6 +236,8 @@ async def main():
         logger.info("Shutting down...")
         await hub.stop_all()
         engine.stop()
+        if exchange_client:
+            await exchange_client.close()
     
     shutdown.register_async(cleanup)
     
@@ -196,17 +255,38 @@ async def main():
     logger.info(f"Engine status: {status['status']}")
     logger.info(f"Active strategies: {status['strategies']}")
     
-    # Simple run loop (no WebSocket for now)
+    # Start live price feed if connected
+    if exchange_client and connected:
+        logger.info("Starting live price feed...")
+        await exchange_client.start_price_feed(args.symbols, interval=5.0)
+        
+        # Subscribe engine to price updates
+        for symbol in args.symbols:
+            exchange_client.subscribe_price(symbol, lambda s, p: asyncio.create_task(
+                engine._process_price_update(s, p)
+            ))
+    
     print("\n" + "=" * 60)
     print("  ✅ BOT STARTED SUCCESSFULLY")
+    if connected:
+        print(f"  📡 Live prices: {', '.join(args.symbols)}")
     print("=" * 60)
     print("  Press Ctrl+C to stop")
     print("=" * 60)
     
     try:
-        # Just wait for keyboard interrupt
+        # Main loop - show periodic status
+        tick = 0
         while True:
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
+            tick += 1
+            
+            # Every 60 seconds, print status
+            if tick % 12 == 0:
+                status = engine.get_status()
+                pnl = status.get('total_pnl', 0)
+                logger.info(f"[{tick*5}s] P&L: ${pnl:,.2f} | Active: {len([s for s in status['strategies'].values() if s['active']])}")
+            
     except KeyboardInterrupt:
         pass
     finally:
