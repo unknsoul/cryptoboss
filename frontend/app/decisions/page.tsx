@@ -1,127 +1,211 @@
-import { Card } from '../../components/shared/Card';
-import { Badge } from '../../components/shared/Badge';
-import { PageHeader } from '../../components/layout/PageHeader';
+'use client';
 
-// Mock decision flow data
-const mockDecisions = [
+/**
+ * Decision Flow Page
+ * 
+ * Purpose: Explain why the system acted or did nothing
+ * Rules:
+ * - Readable text explanations
+ * - Chronological order
+ * - No raw logs by default
+ */
+
+// Mock decision data
+const decisions = [
     {
         id: 1,
-        timestamp: '2026-01-27T22:45:00',
-        stage: 'MARKET_CONTEXT',
-        result: 'PASS',
-        reason: 'Context: RANGING, trading allowed',
+        timestamp: '14:32:15',
+        type: 'PROPOSAL_REJECTED',
+        summary: 'Long entry proposal rejected',
+        details: [
+            { label: 'Reason', value: 'Trade budget exhausted for current context' },
+            { label: 'Context', value: 'RANGING' },
+            { label: 'Trades Used', value: '3/3' },
+        ],
+        variant: 'warning' as const,
     },
     {
         id: 2,
-        timestamp: '2026-01-27T22:45:01',
-        stage: 'BIAS_ENGINE',
-        result: 'PASS',
-        reason: 'Bias: LONG_BIAS (68% conviction)',
+        timestamp: '14:28:42',
+        type: 'CONTEXT_CHANGE',
+        summary: 'Market context changed to RANGING',
+        details: [
+            { label: 'Previous', value: 'TRENDING_UP' },
+            { label: 'Confidence', value: '78%' },
+            { label: 'Cooldown', value: '15 minutes applied' },
+        ],
+        variant: 'neutral' as const,
     },
     {
         id: 3,
-        timestamp: '2026-01-27T22:45:02',
-        stage: 'BIAS_PRE_FILTER',
-        result: 'PASS',
-        reason: '2 proposals passed, 1 filtered (direction mismatch)',
+        timestamp: '14:15:00',
+        type: 'TRADE_EXECUTED',
+        summary: 'Short exit executed successfully',
+        details: [
+            { label: 'Symbol', value: 'BTC/USDT' },
+            { label: 'P&L', value: '+$42.50 (0.85%)' },
+            { label: 'Reason', value: 'Target profit reached' },
+        ],
+        variant: 'success' as const,
     },
     {
         id: 4,
-        timestamp: '2026-01-27T22:45:03',
-        stage: 'SCORING_CONTRACT',
-        result: 'PASS',
-        reason: 'Validated: dca_btc (score=0.805)',
+        timestamp: '13:45:22',
+        type: 'PROPOSAL_REJECTED',
+        summary: 'Entry blocked by risk guardian',
+        details: [
+            { label: 'Reason', value: 'Daily loss limit approaching (85% used)' },
+            { label: 'Limit', value: '-$425 / -$500' },
+            { label: 'Action', value: 'Trade suspended until reset' },
+        ],
+        variant: 'danger' as const,
     },
     {
         id: 5,
-        timestamp: '2026-01-27T22:45:04',
-        stage: 'CAPITAL_GOVERNOR',
-        result: 'PASS',
-        reason: 'Allocated: 75% ($7,500 available)',
+        timestamp: '13:30:00',
+        type: 'NO_ACTION',
+        summary: 'No trade signal generated',
+        details: [
+            { label: 'Reason', value: 'Bias conviction below threshold' },
+            { label: 'Required', value: '65%' },
+            { label: 'Current', value: '52%' },
+        ],
+        variant: 'neutral' as const,
+    },
+    {
+        id: 6,
+        timestamp: '12:55:18',
+        type: 'BIAS_CHANGE',
+        summary: 'Bias shifted to LONG_BIAS',
+        details: [
+            { label: 'Previous', value: 'NEUTRAL' },
+            { label: 'Conviction', value: '68%' },
+            { label: 'Signal', value: 'Higher lows on 4H' },
+        ],
+        variant: 'neutral' as const,
     },
 ];
 
-const mockRejections = [
-    { id: 1, strategy: 'grid_btc', reason: 'Direction SHORT conflicts with LONG_BIAS', stage: 'BIAS_PRE_FILTER' },
-    { id: 2, strategy: 'scalp_eth', reason: 'Score 0.42 below threshold 0.50', stage: 'SCORING_CONTRACT' },
-];
+const decisionTypeLabels: Record<string, { text: string; icon: string }> = {
+    'TRADE_EXECUTED': { text: 'Trade', icon: '✓' },
+    'PROPOSAL_REJECTED': { text: 'Rejected', icon: '✗' },
+    'CONTEXT_CHANGE': { text: 'Context', icon: '↻' },
+    'BIAS_CHANGE': { text: 'Bias', icon: '↔' },
+    'NO_ACTION': { text: 'No Action', icon: '—' },
+};
+
+function DecisionCard({ decision }: { decision: typeof decisions[0] }) {
+    const typeInfo = decisionTypeLabels[decision.type] || { text: decision.type, icon: '•' };
+
+    const variantClasses = {
+        success: 'border-l-[#4a9268]',
+        warning: 'border-l-[#c4a052]',
+        danger: 'border-l-[#a65454]',
+        neutral: 'border-l-[#6b7280]',
+    };
+
+    const badgeClasses = {
+        success: 'badge-success',
+        warning: 'badge-warning',
+        danger: 'badge-danger',
+        neutral: 'badge-neutral',
+    };
+
+    return (
+        <div className={`card border-l-4 ${variantClasses[decision.variant]}`}>
+            <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                    <span className="text-xs font-mono text-[#6b7280]">{decision.timestamp}</span>
+                    <span className={`badge ${badgeClasses[decision.variant]}`}>
+                        {typeInfo.icon} {typeInfo.text}
+                    </span>
+                </div>
+            </div>
+
+            <h3 className="text-[#e7e9ea] font-medium mb-3">{decision.summary}</h3>
+
+            <div className="space-y-2">
+                {decision.details.map((detail, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-sm">
+                        <span className="text-[#6b7280]">{detail.label}</span>
+                        <span className="text-[#8b98a5]">{detail.value}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
 
 export default function DecisionFlowPage() {
     return (
-        <div>
-            <PageHeader
-                title="Decision Flow"
-                description="Understand WHY the bot acted or did nothing"
-            />
+        <div className="space-y-6">
+            {/* Page Header */}
+            <div className="mb-8">
+                <h1 className="heading-lg mb-1">Decision Flow</h1>
+                <p className="text-[#8b98a5] text-sm">
+                    Explain why the system acted or did nothing — every decision is traceable
+                </p>
+            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Decision Timeline */}
-                <Card title="Execution Flow" subtitle="9-stage pipeline" className="lg:col-span-2">
-                    <div className="space-y-4">
-                        {mockDecisions.map((decision, idx) => (
-                            <div key={decision.id} className="flex items-start gap-4">
-                                {/* Timeline connector */}
-                                <div className="flex flex-col items-center">
-                                    <div className={`w-3 h-3 rounded-full ${decision.result === 'PASS' ? 'bg-green-500' : 'bg-red-500'
-                                        }`} />
-                                    {idx < mockDecisions.length - 1 && (
-                                        <div className="w-0.5 h-8 bg-[#2d3640] mt-1" />
-                                    )}
-                                </div>
+            {/* Summary Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="card text-center">
+                    <span className="label">Today's Decisions</span>
+                    <span className="value-lg block mt-1">24</span>
+                </div>
+                <div className="card text-center">
+                    <span className="label">Trades Executed</span>
+                    <span className="value-lg block mt-1 text-[#4a9268]">3</span>
+                </div>
+                <div className="card text-center">
+                    <span className="label">Proposals Rejected</span>
+                    <span className="value-lg block mt-1 text-[#c4a052]">8</span>
+                </div>
+                <div className="card text-center">
+                    <span className="label">No Action (Normal)</span>
+                    <span className="value-lg block mt-1 text-[#6b7280]">13</span>
+                </div>
+            </div>
 
-                                {/* Content */}
-                                <div className="flex-1 pb-4">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-sm font-medium text-white">{decision.stage}</span>
-                                        <Badge variant={decision.result === 'PASS' ? 'success' : 'danger'} size="sm">
-                                            {decision.result}
-                                        </Badge>
-                                    </div>
-                                    <p className="text-sm text-[#8b98a5] mt-1">{decision.reason}</p>
-                                    <span className="text-xs text-[#6b7280] mt-1 block">
-                                        {new Date(decision.timestamp).toLocaleTimeString()}
-                                    </span>
-                                </div>
-                            </div>
-                        ))}
+            {/* Filter bar */}
+            <div className="flex items-center gap-2 mb-6">
+                <button className="btn btn-ghost text-sm">All</button>
+                <button className="btn btn-ghost text-sm">Trades</button>
+                <button className="btn btn-ghost text-sm">Rejected</button>
+                <button className="btn btn-ghost text-sm">Context</button>
+                <button className="btn btn-ghost text-sm">Bias</button>
+            </div>
+
+            {/* Decision Timeline */}
+            <div className="space-y-4">
+                {decisions.map((decision) => (
+                    <DecisionCard key={decision.id} decision={decision} />
+                ))}
+            </div>
+
+            {/* Load More */}
+            <div className="text-center mt-8">
+                <button className="btn btn-ghost">
+                    Load Earlier Decisions
+                </button>
+            </div>
+
+            {/* Explainer Banner */}
+            <div className="card mt-8 bg-[#1a1f26]">
+                <div className="flex items-start gap-4">
+                    <div className="text-2xl">💡</div>
+                    <div>
+                        <h3 className="text-[#e7e9ea] font-medium mb-1">
+                            Understanding "No Action" Decisions
+                        </h3>
+                        <p className="text-sm text-[#8b98a5]">
+                            Most decisions result in no trade — this is normal and expected.
+                            The system only acts when all conditions align: context allows trading,
+                            bias has sufficient conviction, proposals pass risk checks, and budget is available.
+                            A high "No Action" count indicates disciplined risk management.
+                        </p>
                     </div>
-                </Card>
-
-                {/* Rejection Reasons */}
-                <Card title="Recent Rejections" subtitle="Why proposals failed">
-                    {mockRejections.length > 0 ? (
-                        <div className="space-y-4">
-                            {mockRejections.map((rejection) => (
-                                <div key={rejection.id} className="p-3 bg-[#242b33] rounded-lg">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-sm font-medium text-white">{rejection.strategy}</span>
-                                        <Badge variant="neutral" size="sm">{rejection.stage}</Badge>
-                                    </div>
-                                    <p className="text-xs text-[#8b98a5]">{rejection.reason}</p>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <p className="text-[#8b98a5] text-center py-4">No recent rejections</p>
-                    )}
-                </Card>
-
-                {/* Capital Veto Messages */}
-                <Card title="Capital Decisions" className="lg:col-span-3">
-                    <div className="flex items-center gap-4 p-4 bg-[#242b33] rounded-lg">
-                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
-                            <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-                        <div>
-                            <span className="text-white font-medium">Capital Approved</span>
-                            <p className="text-sm text-[#8b98a5]">
-                                Context: RANGING → 75% allocation. Effective size: $750 approved.
-                            </p>
-                        </div>
-                    </div>
-                </Card>
+                </div>
             </div>
         </div>
     );

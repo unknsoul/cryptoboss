@@ -1,105 +1,189 @@
-import { Card } from '../../components/shared/Card';
-import { Badge } from '../../components/shared/Badge';
-import { PageHeader } from '../../components/layout/PageHeader';
+'use client';
 
-// Mock data - will be replaced with WebSocket data
-const mockData = {
-    price: { symbol: 'BTC/USDT', current: 42150.50, change24h: 2.34 },
-    positions: [
-        { id: 1, symbol: 'BTC/USDT', side: 'LONG', size: 0.25, entry: 41000, current: 42150, pnl: 287.50, pnlPct: 2.80 },
-    ],
-    proposals: { active: 2, pending: 1 },
-    execution: { state: 'READY', lastOrder: null },
-};
+/**
+ * Live Status Page
+ * 
+ * Purpose: Real-time awareness without noise
+ * Rules:
+ * - No flashing prices
+ * - No trade buttons
+ * - Compact, informative display
+ */
+
+import { useState, useEffect } from 'react';
+
+function StatusRow({ label, value, subValue, variant = 'neutral' }: {
+    label: string;
+    value: string | number;
+    subValue?: string;
+    variant?: 'success' | 'warning' | 'danger' | 'neutral';
+}) {
+    const valueColors = {
+        success: 'text-[#4a9268]',
+        warning: 'text-[#c4a052]',
+        danger: 'text-[#a65454]',
+        neutral: 'text-[#e7e9ea]',
+    };
+
+    return (
+        <div className="flex items-center justify-between py-3 border-b border-[#2d3640] last:border-0">
+            <span className="text-[#8b98a5] text-sm">{label}</span>
+            <div className="text-right">
+                <span className={`font-medium ${valueColors[variant]}`}>{value}</span>
+                {subValue && (
+                    <span className="text-[#6b7280] text-sm ml-2">{subValue}</span>
+                )}
+            </div>
+        </div>
+    );
+}
 
 export default function LiveStatusPage() {
-    return (
-        <div>
-            <PageHeader
-                title="Live Status"
-                description="Real-time monitoring of trading activity"
-            />
+    // Client-only state to prevent hydration mismatch
+    const [mounted, setMounted] = useState(false);
+    const [lastUpdate, setLastUpdate] = useState('--:--:--');
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Price Feed */}
-                <Card title="Live Price" subtitle="Real-time market data">
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <span className="text-2xl font-bold text-white">{mockData.price.symbol}</span>
-                            <Badge variant={mockData.price.change24h >= 0 ? 'success' : 'danger'}>
-                                {mockData.price.change24h >= 0 ? '+' : ''}{mockData.price.change24h.toFixed(2)}%
-                            </Badge>
-                        </div>
-                        <div className="text-4xl font-bold text-white">
-                            ${mockData.price.current.toLocaleString()}
-                        </div>
-                        <div className="text-sm text-[#8b98a5]">
-                            Last update: {new Date().toLocaleTimeString()}
-                        </div>
+    // Live data state (will be connected to API)
+    const [liveData, setLiveData] = useState({
+        price: { symbol: 'BTC/USDT', value: 0, change24h: 0 },
+        positions: { open: 0, totalExposure: 0, unrealizedPnL: 0 },
+        proposals: { active: 0, lastRejectedReason: 'None' },
+        execution: { state: 'IDLE', pendingOrders: 0, lastFillTime: '--:--:--' },
+    });
+
+    // Only run on client to prevent hydration mismatch
+    useEffect(() => {
+        setMounted(true);
+
+        // Initial data load
+        setLiveData({
+            price: { symbol: 'BTC/USDT', value: 89168.42, change24h: 2.34 },
+            positions: { open: 2, totalExposure: 4500, unrealizedPnL: 156.80 },
+            proposals: { active: 0, lastRejectedReason: 'Trade budget exhausted' },
+            execution: { state: 'IDLE', pendingOrders: 0, lastFillTime: '14:32:15' },
+        });
+
+        const interval = setInterval(() => {
+            setLastUpdate(new Date().toLocaleTimeString('en-GB', { hour12: false }));
+        }, 5000);
+
+        // Set initial time
+        setLastUpdate(new Date().toLocaleTimeString('en-GB', { hour12: false }));
+
+        return () => clearInterval(interval);
+    }, []);
+
+    const getPnLVariant = (pnl: number) => {
+        if (pnl > 0) return 'success';
+        if (pnl < 0) return 'danger';
+        return 'neutral';
+    };
+
+    // Show loading state until mounted to prevent hydration mismatch
+    if (!mounted) {
+        return (
+            <div className="space-y-6">
+                <div className="mb-8">
+                    <h1 className="heading-lg mb-1">Live Status</h1>
+                    <p className="text-[#8b98a5] text-sm">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Page Header */}
+            <div className="mb-8">
+                <h1 className="heading-lg mb-1">Live Status</h1>
+                <p className="text-[#8b98a5] text-sm">
+                    Real-time awareness — last update: {lastUpdate}
+                </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Price Display - Compact, no flash */}
+                <div className="card">
+                    <div className="card-header">
+                        <span className="card-title">Current Price</span>
                     </div>
-                </Card>
+                    <div className="flex items-baseline gap-3">
+                        <span className="value-xl">${liveData.price.value.toLocaleString()}</span>
+                        <span className={`text-sm ${liveData.price.change24h >= 0 ? 'text-[#4a9268]' : 'text-[#a65454]'}`}>
+                            {liveData.price.change24h >= 0 ? '+' : ''}{liveData.price.change24h}%
+                        </span>
+                    </div>
+                    <div className="text-sm text-[#6b7280] mt-1">{liveData.price.symbol}</div>
+                </div>
 
                 {/* Execution State */}
-                <Card title="Execution State" subtitle="Current system readiness">
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">State</span>
-                            <Badge variant={mockData.execution.state === 'READY' ? 'success' : 'warning'}>
-                                {mockData.execution.state}
-                            </Badge>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Active Proposals</span>
-                            <span className="text-white font-medium">{mockData.proposals.active}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Pending</span>
-                            <span className="text-white font-medium">{mockData.proposals.pending}</span>
-                        </div>
+                <div className="card">
+                    <div className="card-header">
+                        <span className="card-title">Execution State</span>
                     </div>
-                </Card>
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className={`status-dot ${liveData.execution.state === 'IDLE' ? 'status-dot-neutral' :
+                                liveData.execution.state === 'EXECUTING' ? 'status-dot-warning' :
+                                    'status-dot-healthy'
+                            }`} />
+                        <span className="value-md">{liveData.execution.state}</span>
+                    </div>
+                    <StatusRow
+                        label="Pending Orders"
+                        value={liveData.execution.pendingOrders}
+                    />
+                    <StatusRow
+                        label="Last Fill"
+                        value={liveData.execution.lastFillTime}
+                    />
+                </div>
 
-                {/* Open Positions */}
-                <Card title="Open Positions" className="lg:col-span-2" noPadding>
-                    {mockData.positions.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="border-b border-[#2d3640]">
-                                        <th className="text-left text-xs text-[#8b98a5] font-medium py-3 px-4">Symbol</th>
-                                        <th className="text-left text-xs text-[#8b98a5] font-medium py-3 px-4">Side</th>
-                                        <th className="text-right text-xs text-[#8b98a5] font-medium py-3 px-4">Size</th>
-                                        <th className="text-right text-xs text-[#8b98a5] font-medium py-3 px-4">Entry</th>
-                                        <th className="text-right text-xs text-[#8b98a5] font-medium py-3 px-4">Current</th>
-                                        <th className="text-right text-xs text-[#8b98a5] font-medium py-3 px-4">P&L</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {mockData.positions.map((pos) => (
-                                        <tr key={pos.id} className="border-b border-[#2d3640] hover:bg-[#1a1f26]">
-                                            <td className="py-3 px-4 text-white">{pos.symbol}</td>
-                                            <td className="py-3 px-4">
-                                                <Badge variant={pos.side === 'LONG' ? 'success' : 'danger'}>
-                                                    {pos.side}
-                                                </Badge>
-                                            </td>
-                                            <td className="py-3 px-4 text-right text-white">{pos.size}</td>
-                                            <td className="py-3 px-4 text-right text-[#8b98a5]">${pos.entry.toLocaleString()}</td>
-                                            <td className="py-3 px-4 text-right text-white">${pos.current.toLocaleString()}</td>
-                                            <td className={`py-3 px-4 text-right font-medium ${pos.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                {pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} ({pos.pnlPct.toFixed(2)}%)
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <div className="p-8 text-center text-[#8b98a5]">
-                            No open positions
-                        </div>
-                    )}
-                </Card>
+                {/* Open Positions Summary */}
+                <div className="card">
+                    <div className="card-header">
+                        <span className="card-title">Open Positions</span>
+                    </div>
+                    <StatusRow
+                        label="Active Positions"
+                        value={liveData.positions.open}
+                    />
+                    <StatusRow
+                        label="Total Exposure"
+                        value={`$${liveData.positions.totalExposure.toLocaleString()}`}
+                    />
+                    <StatusRow
+                        label="Unrealized P&L"
+                        value={`${liveData.positions.unrealizedPnL >= 0 ? '+' : ''}$${liveData.positions.unrealizedPnL.toFixed(2)}`}
+                        variant={getPnLVariant(liveData.positions.unrealizedPnL)}
+                    />
+                </div>
+
+                {/* Active Proposals */}
+                <div className="card">
+                    <div className="card-header">
+                        <span className="card-title">Proposals</span>
+                    </div>
+                    <StatusRow
+                        label="Active Proposals"
+                        value={liveData.proposals.active}
+                    />
+                    <StatusRow
+                        label="Last Rejection"
+                        value={liveData.proposals.lastRejectedReason}
+                        variant="neutral"
+                    />
+                </div>
+            </div>
+
+            {/* No Trade Buttons Notice */}
+            <div className="card bg-[#1a1f26]">
+                <div className="flex items-center gap-4 text-sm text-[#8b98a5]">
+                    <span className="text-xl">ℹ️</span>
+                    <span>
+                        This is a monitoring view only. Manual trade execution is not available from the dashboard
+                        to maintain system discipline and auditability.
+                    </span>
+                </div>
             </div>
         </div>
     );

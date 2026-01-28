@@ -1,120 +1,187 @@
-import { Card } from '../../components/shared/Card';
-import { Badge } from '../../components/shared/Badge';
-import { PageHeader } from '../../components/layout/PageHeader';
+'use client';
 
-const mockContext = {
-    current: { state: 'RANGING', since: '2026-01-27T19:30:00', duration: 3.2 },
+/**
+ * Market Context Page
+ * 
+ * Purpose: Market regime understanding
+ * Rules:
+ * - Timeline view
+ * - No technical indicator clutter
+ */
+
+// Mock context data
+const contextData = {
+    current: {
+        state: 'RANGING',
+        confidence: 78,
+        timeInState: '2h 34m',
+        tradingAllowed: true,
+    },
+    cooldown: {
+        active: false,
+        remaining: '0m',
+        reason: null,
+    },
     history: [
-        { state: 'RANGING', from: '2026-01-27T19:30:00', to: null, duration: 3.2 },
-        { state: 'TRENDING_UP', from: '2026-01-27T15:00:00', to: '2026-01-27T19:30:00', duration: 4.5 },
-        { state: 'HIGH_VOLATILITY', from: '2026-01-27T13:00:00', to: '2026-01-27T15:00:00', duration: 2.0 },
-        { state: 'RANGING', from: '2026-01-27T08:00:00', to: '2026-01-27T13:00:00', duration: 5.0 },
+        {
+            state: 'RANGING',
+            startTime: '12:00',
+            duration: '2h 34m',
+            active: true,
+            transitionReason: 'Volatility decreased below threshold'
+        },
+        {
+            state: 'TRENDING_UP',
+            startTime: '09:30',
+            duration: '2h 30m',
+            active: false,
+            transitionReason: 'Higher highs confirmed on 1H'
+        },
+        {
+            state: 'HIGH_VOLATILITY',
+            startTime: '08:45',
+            duration: '45m',
+            active: false,
+            transitionReason: 'News event volatility spike'
+        },
+        {
+            state: 'TRENDING_UP',
+            startTime: '06:00',
+            duration: '2h 45m',
+            active: false,
+            transitionReason: 'Session open momentum'
+        },
     ],
-    cooldown: { active: false, remaining: 0 },
-    minDuration: 2,
 };
 
 const stateColors: Record<string, string> = {
-    'TRENDING_UP': 'success',
-    'TRENDING_DOWN': 'danger',
-    'RANGING': 'info',
-    'HIGH_VOLATILITY': 'warning',
-    'NO_TRADE': 'neutral',
+    'TRENDING_UP': 'badge-success',
+    'TRENDING_DOWN': 'badge-danger',
+    'RANGING': 'badge-accent',
+    'HIGH_VOLATILITY': 'badge-warning',
+    'NO_TRADE': 'badge-neutral',
 };
 
-export default function ContextPage() {
+export default function MarketContextPage() {
     return (
-        <div>
-            <PageHeader
-                title="Market Context"
-                description="Macro understanding of current market state"
-            />
+        <div className="space-y-6">
+            {/* Page Header */}
+            <div className="mb-8">
+                <h1 className="heading-lg mb-1">Market Context</h1>
+                <p className="text-[#8b98a5] text-sm">
+                    Market regime understanding — no indicator clutter
+                </p>
+            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Current State */}
-                <Card title="Current State">
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-center py-4">
-                            <Badge variant={stateColors[mockContext.current.state] as any} size="md">
-                                {mockContext.current.state}
-                            </Badge>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Duration</span>
-                            <span className="text-white font-medium">{mockContext.current.duration.toFixed(1)}h</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Min Required</span>
-                            <span className="text-white font-medium">{mockContext.minDuration}h</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Since</span>
-                            <span className="text-white text-sm">
-                                {new Date(mockContext.current.since).toLocaleTimeString()}
-                            </span>
-                        </div>
+            {/* Current State Card */}
+            <div className="card">
+                <div className="card-header">
+                    <span className="card-title">Current State</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="text-center">
+                        <span className="label block mb-2">Regime</span>
+                        <span className={`badge ${stateColors[contextData.current.state]} text-lg px-4 py-2`}>
+                            {contextData.current.state}
+                        </span>
                     </div>
-                </Card>
+                    <div className="text-center">
+                        <span className="label block mb-2">Confidence</span>
+                        <span className="value-xl">{contextData.current.confidence}%</span>
+                    </div>
+                    <div className="text-center">
+                        <span className="label block mb-2">Time in State</span>
+                        <span className="value-lg">{contextData.current.timeInState}</span>
+                    </div>
+                    <div className="text-center">
+                        <span className="label block mb-2">Trading</span>
+                        <span className={`badge ${contextData.current.tradingAllowed ? 'badge-success' : 'badge-danger'}`}>
+                            {contextData.current.tradingAllowed ? 'ALLOWED' : 'BLOCKED'}
+                        </span>
+                    </div>
+                </div>
 
-                {/* Transition Cooldown */}
-                <Card title="Transition Status">
-                    <div className="space-y-4">
-                        {mockContext.cooldown.active ? (
-                            <>
-                                <div className="text-center">
-                                    <span className="text-2xl font-bold text-yellow-400">
-                                        {mockContext.cooldown.remaining}m
-                                    </span>
-                                    <p className="text-sm text-[#8b98a5] mt-1">Cooldown remaining</p>
-                                </div>
-                                <div className="h-2 bg-[#242b33] rounded-full overflow-hidden">
-                                    <div className="h-full bg-yellow-500 animate-pulse" style={{ width: '60%' }} />
-                                </div>
-                            </>
-                        ) : (
-                            <div className="text-center py-4">
-                                <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center mx-auto">
-                                    <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                </div>
-                                <p className="text-sm text-[#8b98a5] mt-3">Transition allowed</p>
+                {/* Cooldown Timer */}
+                {contextData.cooldown.active && (
+                    <div className="mt-6 p-4 bg-[#c4a052]/10 rounded-md">
+                        <div className="flex items-center gap-3">
+                            <span className="text-[#c4a052]">⏱</span>
+                            <div>
+                                <span className="text-[#c4a052] font-medium">
+                                    Transition Cooldown Active: {contextData.cooldown.remaining} remaining
+                                </span>
+                                <p className="text-sm text-[#8b98a5] mt-1">
+                                    {contextData.cooldown.reason}
+                                </p>
                             </div>
-                        )}
-                    </div>
-                </Card>
-
-                {/* State Machine Status */}
-                <Card title="State Machine">
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Valid Since</span>
-                            <Badge variant="success">YES</Badge>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Trading Allowed</span>
-                            <Badge variant={mockContext.current.state !== 'NO_TRADE' ? 'success' : 'danger'}>
-                                {mockContext.current.state !== 'NO_TRADE' ? 'YES' : 'NO'}
-                            </Badge>
                         </div>
                     </div>
-                </Card>
+                )}
+            </div>
 
-                {/* Context History */}
-                <Card title="Context History" subtitle="Last 24 hours" className="lg:col-span-3">
-                    <div className="space-y-3">
-                        {mockContext.history.map((item, idx) => (
-                            <div key={idx} className="flex items-center gap-4 p-3 bg-[#242b33] rounded-lg">
-                                <Badge variant={stateColors[item.state] as any}>{item.state}</Badge>
-                                <div className="flex-1 text-sm text-[#8b98a5]">
-                                    {new Date(item.from).toLocaleTimeString()}
-                                    {item.to ? ` → ${new Date(item.to).toLocaleTimeString()}` : ' → now'}
+            {/* Context History Timeline */}
+            <div className="card">
+                <div className="card-header">
+                    <span className="card-title">Context History (Today)</span>
+                </div>
+
+                <div className="timeline">
+                    {contextData.history.map((item, idx) => (
+                        <div
+                            key={idx}
+                            className={`timeline-item ${item.active ? 'timeline-item-success' : ''}`}
+                        >
+                            <div className="flex items-start justify-between mb-2">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-xs font-mono text-[#6b7280]">{item.startTime}</span>
+                                    <span className={`badge ${stateColors[item.state]}`}>{item.state}</span>
+                                    {item.active && (
+                                        <span className="badge badge-success">CURRENT</span>
+                                    )}
                                 </div>
-                                <span className="text-sm text-white font-medium">{item.duration.toFixed(1)}h</span>
+                                <span className="text-sm text-[#8b98a5]">{item.duration}</span>
                             </div>
-                        ))}
+                            <p className="text-sm text-[#6b7280]">
+                                Transition: {item.transitionReason}
+                            </p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Context State Descriptions */}
+            <div className="card bg-[#1a1f26]">
+                <div className="card-header">
+                    <span className="card-title">State Reference</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-3 border border-[#2d3640] rounded-md">
+                        <span className="badge badge-success mb-2">TRENDING_UP</span>
+                        <p className="text-sm text-[#8b98a5]">
+                            Clear upward momentum. Long entries enabled, shorts restricted.
+                        </p>
                     </div>
-                </Card>
+                    <div className="p-3 border border-[#2d3640] rounded-md">
+                        <span className="badge badge-danger mb-2">TRENDING_DOWN</span>
+                        <p className="text-sm text-[#8b98a5]">
+                            Clear downward momentum. Short entries enabled, longs restricted.
+                        </p>
+                    </div>
+                    <div className="p-3 border border-[#2d3640] rounded-md">
+                        <span className="badge badge-accent mb-2">RANGING</span>
+                        <p className="text-sm text-[#8b98a5]">
+                            Consolidation phase. Mean reversion strategies enabled, reduced position sizes.
+                        </p>
+                    </div>
+                    <div className="p-3 border border-[#2d3640] rounded-md">
+                        <span className="badge badge-warning mb-2">HIGH_VOLATILITY</span>
+                        <p className="text-sm text-[#8b98a5]">
+                            Elevated volatility. Trading restricted, capital protection mode.
+                        </p>
+                    </div>
+                </div>
             </div>
         </div>
     );

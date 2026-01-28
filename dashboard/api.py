@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import random
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -17,11 +18,25 @@ import sys
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Import session manager
+try:
+    from src.core.session_manager import get_session_manager, TradingMode
+    SESSION_MANAGER_AVAILABLE = True
+except ImportError:
+    SESSION_MANAGER_AVAILABLE = False
+
+# Import binance client for validation
+try:
+    from src.exchange.binance_client import BinanceClient
+    BINANCE_AVAILABLE = True
+except ImportError:
+    BINANCE_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Dashboard")
@@ -42,9 +57,31 @@ app.add_middleware(
 )
 
 
+# === Models ===
+
+class EngineConfig(BaseModel):
+    mode: str = "paper"
+    capital: float = 10000.0
+    symbols: List[str] = ["BTC/USDT"]
+    strategy: str = "dca"
+
+
+class SessionSwitchRequest(BaseModel):
+    mode: str
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+
+
+class ValidateKeysRequest(BaseModel):
+    api_key: str
+    api_secret: str
+    testnet: bool = True
+
+
 # Global state with proper initialization
 class DashboardState:
     def __init__(self):
+        self.session_id = str(uuid.uuid4())
         self.mode = "paper"
         self.initial_capital = 10000.0
         self.capital = 10000.0
@@ -59,6 +96,66 @@ class DashboardState:
         self.total_trades = 0
         self.winning_trades = 0
         self.losing_trades = 0
+        self.api_validated = False
+        self.exchange_client = None
+        
+        # System state
+        self.environment = "paper"  # paper, testnet, live
+        self.connection_status = "disconnected"  # disconnected, connecting, connected, error
+        self.timestamp_offset_ms = 0
+        self.last_time_sync = None
+        self.kill_switch_active = False
+        self.kill_switch_reason = None
+        
+        # Market context
+        self.market_context = "UNKNOWN"  # TRENDING, RANGING, VOLATILE, CRISIS
+        self.market_bias = "NEUTRAL"  # BULLISH, BEARISH, NEUTRAL
+        self.last_context_update = None
+        
+        # Decision tracking
+        self.recent_decisions: List[Dict] = []
+        self.last_decision_time = None
+        self.decisions_today = 0
+        self.rejections_today = 0
+
+    def reset(self, new_mode: str = "paper"):
+        """Reset all state for new session."""
+        self.session_id = str(uuid.uuid4())
+        self.mode = new_mode
+        self.capital = self.initial_capital
+        self.pnl = 0.0
+        self.start_time = datetime.now()
+        self.price_history = []
+        self.trades = []
+        self.position = 0.0
+        self.position_entry_price = 0.0
+        self.total_trades = 0
+        self.winning_trades = 0
+        self.losing_trades = 0
+        self.api_validated = new_mode == "paper"
+        
+        # Reset system state
+        self.environment = new_mode
+        self.connection_status = "disconnected" if new_mode != "paper" else "connected"
+        self.timestamp_offset_ms = 0
+        self.market_context = "UNKNOWN"
+        self.market_bias = "NEUTRAL"
+        self.recent_decisions = []
+        self.decisions_today = 0
+        self.rejections_today = 0
+        
+        if self.exchange_client:
+            asyncio.create_task(self._destroy_client())
+        self.exchange_client = None
+        logger.info(f"Session reset: {self.session_id[:8]}... (mode={new_mode})")
+    
+    async def _destroy_client(self):
+        if self.exchange_client:
+            try:
+                await self.exchange_client.destroy()
+            except:
+                pass
+
 
     @property
     def portfolio_value(self) -> float:
@@ -81,15 +178,6 @@ class DashboardState:
         return (self.winning_trades / self.total_trades) * 100
 
 state = DashboardState()
-
-
-# === Models ===
-
-class EngineConfig(BaseModel):
-    mode: str = "paper"
-    capital: float = 10000.0
-    symbols: List[str] = ["BTC/USDT"]
-    strategy: str = "dca"
 
 
 # === WebSocket Manager ===
@@ -133,12 +221,275 @@ async def root():
     return HTMLResponse("<h1>Dashboard not found</h1>")
 
 
+# === Session Management ===
+
+@app.get("/api/session")
+async def get_session():
+    """Get current session info."""
+    return {
+        "session_id": state.session_id,
+        "mode": state.mode,
+        "created_at": state.start_time.isoformat(),
+        "is_running": True,
+        "api_validated": state.api_validated,
+        "connection_status": "connected" if state.api_validated else "disconnected"
+    }
+
+
+@app.post("/api/session/switch")
+async def switch_session(request: SessionSwitchRequest):
+    """
+    Switch trading mode and create a new session.
+    
+    This endpoint:
+    1. Validates API credentials (for non-paper modes)
+    2. Resets all state to fresh values
+    3. Creates a new session_id
+    4. Returns fresh exchange balances (if applicable)
+    """
+    mode = request.mode.lower()
+    
+    if mode not in ["paper", "testnet", "live"]:
+        raise HTTPException(status_code=400, detail="Invalid mode. Must be: paper, testnet, or live")
+    
+    # For non-paper modes, validate API credentials
+    balances = {}
+    if mode != "paper":
+        if not request.api_key or not request.api_secret:
+            raise HTTPException(status_code=400, detail="API credentials required for non-paper mode")
+        
+        if not BINANCE_AVAILABLE:
+            raise HTTPException(status_code=500, detail="Exchange client not available")
+        
+        try:
+            # Create client and validate
+            testnet = mode == "testnet"
+            client = BinanceClient(
+                api_key=request.api_key,
+                api_secret=request.api_secret,
+                testnet=testnet
+            )
+            
+            validation = await client.validate_credentials()
+            
+            if not validation["success"]:
+                await client.destroy()
+                raise HTTPException(status_code=401, detail=f"Invalid credentials: {validation['message']}")
+            
+            balances = validation.get("balances", {})
+            
+            # Store the client in state
+            state.exchange_client = client
+            state.api_validated = True
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Session switch error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # Reset state for new session
+    state.reset(mode)
+    
+    # Broadcast session change to WebSocket clients
+    await manager.broadcast({
+        "type": "session_change",
+        "session_id": state.session_id,
+        "mode": mode,
+        "message": f"Switched to {mode.upper()} mode"
+    })
+    
+    logger.info(f"Session switched: {state.session_id[:8]}... (mode={mode})")
+    
+    return {
+        "success": True,
+        "session_id": state.session_id,
+        "mode": mode,
+        "created_at": state.start_time.isoformat(),
+        "balances": balances,
+        "api_validated": state.api_validated
+    }
+
+
+@app.post("/api/validate-keys")
+async def validate_keys(request: ValidateKeysRequest):
+    """
+    Validate API credentials without switching mode.
+    Used by the frontend to pre-validate keys before mode switch.
+    """
+    if not BINANCE_AVAILABLE:
+        return {
+            "success": False,
+            "message": "Exchange client not available",
+            "balances": {}
+        }
+    
+    try:
+        client = BinanceClient(
+            api_key=request.api_key,
+            api_secret=request.api_secret,
+            testnet=request.testnet
+        )
+        
+        result = await client.validate_credentials()
+        await client.destroy()
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Key validation error: {e}")
+        return {
+            "success": False,
+            "message": str(e),
+            "balances": {}
+        }
+
+
+@app.post("/api/session/reset")
+async def reset_session():
+    """Reset current session (keep same mode but clear all data)."""
+    current_mode = state.mode
+    state.reset(current_mode)
+    
+    await manager.broadcast({
+        "type": "session_change",
+        "session_id": state.session_id,
+        "mode": current_mode,
+        "message": "Session reset"
+    })
+    
+    return {
+        "success": True,
+        "session_id": state.session_id,
+        "mode": current_mode,
+        "message": "Session reset successfully"
+    }
+
+
+# === System State Endpoints ===
+
+@app.get("/api/system")
+async def get_system():
+    """
+    Get complete system state.
+    
+    Returns environment, connection, time sync, kill switch state.
+    This is the primary endpoint for dashboard observability.
+    """
+    uptime = (datetime.now() - state.start_time).total_seconds()
+    
+    return {
+        "session_id": state.session_id,
+        "environment": state.environment,
+        "mode": state.mode,
+        "connection_status": state.connection_status,
+        "api_validated": state.api_validated,
+        "timestamp_offset_ms": state.timestamp_offset_ms,
+        "last_time_sync": state.last_time_sync.isoformat() if state.last_time_sync else None,
+        "kill_switch": {
+            "active": state.kill_switch_active,
+            "reason": state.kill_switch_reason
+        },
+        "uptime_seconds": uptime,
+        "started_at": state.start_time.isoformat(),
+        "ws_clients": len(manager.active_connections)
+    }
+
+
+@app.get("/api/context")
+async def get_context():
+    """
+    Get current market context and bias.
+    
+    Used by dashboard to show trading environment.
+    """
+    return {
+        "market_context": state.market_context,
+        "bias": state.market_bias,
+        "last_update": state.last_context_update.isoformat() if state.last_context_update else None,
+        "current_price": state.current_price,
+        "price_change_pct": ((state.current_price - state.last_price) / state.last_price * 100) if state.last_price > 0 else 0,
+        "symbol": "BTC/USDT"
+    }
+
+
+@app.get("/api/decisions")
+async def get_decisions(limit: int = 50):
+    """
+    Get recent trading decisions.
+    
+    Returns decision flow results, rejections, and outcomes.
+    """
+    return {
+        "decisions": state.recent_decisions[-limit:],
+        "decisions_today": state.decisions_today,
+        "rejections_today": state.rejections_today,
+        "last_decision_time": state.last_decision_time.isoformat() if state.last_decision_time else None,
+        "total_trades": state.total_trades
+    }
+
+
+@app.get("/api/risk")
+async def get_risk():
+    """
+    Get risk state and budget.
+    
+    Shows drawdown, allocation, and remaining risk budget.
+    """
+    drawdown_pct = (state.pnl / state.initial_capital * 100) if state.initial_capital > 0 else 0
+    
+    return {
+        "daily_pnl": state.pnl,
+        "daily_pnl_pct": drawdown_pct,
+        "unrealized_pnl": state.unrealized_pnl,
+        "total_pnl": state.total_pnl,
+        "capital": {
+            "initial": state.initial_capital,
+            "current": state.capital,
+            "allocated": state.position * state.current_price
+        },
+        "limits": {
+            "daily_loss_limit_pct": 5.0,
+            "max_position_pct": 25.0,
+            "max_trades_per_day": 10
+        },
+        "remaining_budget": {
+            "daily_loss_available_pct": 5.0 + drawdown_pct,
+            "trades_remaining": 10 - state.total_trades
+        },
+        "kill_switch_active": state.kill_switch_active
+    }
+
+
+@app.post("/api/kill-switch")
+async def toggle_kill_switch(active: bool = True, reason: str = "Manual activation"):
+    """Toggle the kill switch."""
+    state.kill_switch_active = active
+    state.kill_switch_reason = reason if active else None
+    
+    await manager.broadcast({
+        "type": "kill_switch",
+        "active": active,
+        "reason": reason
+    })
+    
+    logger.warning(f"Kill switch {'ACTIVATED' if active else 'DEACTIVATED'}: {reason}")
+    
+    return {
+        "success": True,
+        "kill_switch_active": state.kill_switch_active,
+        "reason": state.kill_switch_reason
+    }
+
+
+
 @app.get("/api/status")
 async def get_status():
     """Get current bot status."""
     uptime = (datetime.now() - state.start_time).total_seconds()
     
     return {
+        "session_id": state.session_id,
         "status": "running",
         "mode": state.mode,
         "capital": state.initial_capital,
@@ -154,6 +505,7 @@ async def get_status():
         "position": state.position,
         "current_price": state.current_price,
         "connected_clients": len(manager.active_connections),
+        "api_validated": state.api_validated,
         "timestamp": datetime.now().isoformat()
     }
 

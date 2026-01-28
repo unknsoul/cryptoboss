@@ -1,167 +1,239 @@
 'use client';
 
+/**
+ * Settings Page
+ * 
+ * Purpose: Safe system control
+ * Rules:
+ * - Dangerous actions require confirmation
+ * - No strategy editing here
+ * - Read-only view of risk limits
+ */
+
 import { useState } from 'react';
-import { Card } from '../../components/shared/Card';
-import { Badge } from '../../components/shared/Badge';
-import { PageHeader } from '../../components/layout/PageHeader';
+
+// Mock settings data
+const settingsData = {
+    tradingMode: 'paper' as 'paper' | 'live',
+    apiConnection: {
+        exchange: 'Binance',
+        status: 'connected',
+        lastPing: '45ms',
+        testnet: true,
+    },
+    riskLimits: {
+        dailyLossLimit: 500,
+        weeklyLossLimit: 1500,
+        maxDrawdown: 10,
+        maxPositions: 5,
+        maxExposure: 5000,
+        tradesPerDay: 10,
+        tradesPerContext: 3,
+        lossesPerBias: 2,
+    },
+};
 
 export default function SettingsPage() {
-    const [tradingMode, setTradingMode] = useState<'paper' | 'live'>('paper');
-    const [showLiveConfirm, setShowLiveConfirm] = useState(false);
-
-    const mockSettings = {
-        api: { connected: true, latency: 45 },
-        limits: {
-            maxDailyLoss: 500,
-            maxPositionSize: 2000,
-            maxOpenPositions: 3,
-        },
-        killSwitch: false,
-    };
+    const [mode, setMode] = useState(settingsData.tradingMode);
+    const [showModeConfirm, setShowModeConfirm] = useState(false);
+    const [killSwitchStep, setKillSwitchStep] = useState(0);
 
     const handleModeChange = () => {
-        if (tradingMode === 'paper') {
-            setShowLiveConfirm(true);
+        if (mode === 'paper') {
+            setShowModeConfirm(true);
         } else {
-            setTradingMode('paper');
+            setMode('paper');
         }
     };
 
-    const confirmLiveMode = () => {
-        setTradingMode('live');
-        setShowLiveConfirm(false);
+    const confirmModeChange = () => {
+        setMode('live');
+        setShowModeConfirm(false);
+    };
+
+    const handleKillSwitch = () => {
+        if (killSwitchStep === 0) {
+            setKillSwitchStep(1);
+        } else if (killSwitchStep === 1) {
+            setKillSwitchStep(2);
+            // Activate kill switch
+            console.log('KILL SWITCH ACTIVATED');
+            setTimeout(() => setKillSwitchStep(0), 5000);
+        }
     };
 
     return (
-        <div>
-            <PageHeader
-                title="Settings"
-                description="Safe configuration – dangerous actions require confirmation"
-            />
+        <div className="space-y-6">
+            {/* Page Header */}
+            <div className="mb-8">
+                <h1 className="heading-lg mb-1">Settings</h1>
+                <p className="text-[#8b98a5] text-sm">
+                    Safe system control — dangerous actions require confirmation
+                </p>
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Trading Mode */}
-                <Card title="Trading Mode">
+                <div className="card">
+                    <div className="card-header">
+                        <span className="card-title">Trading Mode</span>
+                    </div>
+
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between py-3">
                             <div>
-                                <span className="text-white font-medium">Current Mode</span>
-                                <p className="text-sm text-[#8b98a5] mt-1">
-                                    {tradingMode === 'paper'
-                                        ? 'Paper trading with simulated orders'
-                                        : 'Live trading with real capital'}
+                                <span className="text-[#e7e9ea] font-medium">Current Mode</span>
+                                <p className="text-sm text-[#6b7280] mt-1">
+                                    {mode === 'paper'
+                                        ? 'Simulated trading with no real funds at risk'
+                                        : 'LIVE trading with real funds'}
                                 </p>
                             </div>
-                            <Badge variant={tradingMode === 'paper' ? 'info' : 'danger'} size="md">
-                                {tradingMode.toUpperCase()}
-                            </Badge>
+                            <span className={`badge ${mode === 'paper' ? 'badge-accent' : 'badge-danger'}`}>
+                                {mode === 'paper' ? '📄 PAPER' : '🔴 LIVE'}
+                            </span>
                         </div>
+
                         <button
                             onClick={handleModeChange}
-                            className={`w-full py-2 rounded-md text-sm font-medium transition-colors ${tradingMode === 'paper'
-                                    ? 'bg-red-600 text-white hover:bg-red-700'
-                                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                                }`}
+                            className={`btn w-full ${mode === 'paper' ? 'btn-danger' : 'btn-ghost'}`}
                         >
-                            {tradingMode === 'paper' ? 'Switch to LIVE' : 'Switch to PAPER'}
+                            {mode === 'paper' ? 'Switch to LIVE Mode' : 'Switch to PAPER Mode'}
                         </button>
                     </div>
-                </Card>
 
-                {/* API Status */}
-                <Card title="API Status">
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Connection</span>
-                            <Badge variant={mockSettings.api.connected ? 'success' : 'danger'}>
-                                {mockSettings.api.connected ? 'CONNECTED' : 'DISCONNECTED'}
-                            </Badge>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Latency</span>
-                            <span className="text-white font-medium">{mockSettings.api.latency}ms</span>
-                        </div>
-                    </div>
-                </Card>
-
-                {/* Risk Limits (Read-only in Live) */}
-                <Card title="Risk Limits" subtitle={tradingMode === 'live' ? 'Read-only in live mode' : 'Configurable in paper mode'}>
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Max Daily Loss</span>
-                            <span className="text-white font-medium">${mockSettings.limits.maxDailyLoss}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Max Position Size</span>
-                            <span className="text-white font-medium">${mockSettings.limits.maxPositionSize}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-[#8b98a5]">Max Open Positions</span>
-                            <span className="text-white font-medium">{mockSettings.limits.maxOpenPositions}</span>
-                        </div>
-                        {tradingMode === 'live' && (
-                            <div className="p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
-                                <p className="text-xs text-yellow-400">
-                                    ⚠️ Risk limits are read-only in live mode for safety.
+                    {/* Mode Change Confirmation Modal */}
+                    {showModeConfirm && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                            <div className="card max-w-md mx-4">
+                                <h3 className="heading-md mb-4">⚠️ Confirm LIVE Mode</h3>
+                                <p className="text-[#8b98a5] mb-4">
+                                    Switching to LIVE mode will execute real trades with real funds.
+                                    Make sure you have:
                                 </p>
-                            </div>
-                        )}
-                    </div>
-                </Card>
-
-                {/* Kill Switch */}
-                <Card title="Emergency Controls">
-                    <div className="space-y-4">
-                        <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/30">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <span className="text-white font-medium">Kill Switch</span>
-                                    <p className="text-xs text-[#8b98a5] mt-1">
-                                        Immediately halt all trading activity
-                                    </p>
+                                <ul className="list-disc list-inside text-sm text-[#8b98a5] mb-6 space-y-1">
+                                    <li>Reviewed all risk limits</li>
+                                    <li>Tested thoroughly in paper mode</li>
+                                    <li>Verified exchange API connectivity</li>
+                                    <li>Set appropriate position sizes</li>
+                                </ul>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => setShowModeConfirm(false)}
+                                        className="btn btn-ghost flex-1"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={confirmModeChange}
+                                        className="btn btn-danger flex-1"
+                                    >
+                                        Confirm LIVE
+                                    </button>
                                 </div>
-                                <Badge variant={mockSettings.killSwitch ? 'danger' : 'neutral'}>
-                                    {mockSettings.killSwitch ? 'ACTIVE' : 'OFF'}
-                                </Badge>
                             </div>
-                            <button className="w-full mt-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors">
-                                ACTIVATE KILL SWITCH
-                            </button>
                         </div>
-                    </div>
-                </Card>
-            </div>
+                    )}
+                </div>
 
-            {/* Live Mode Confirmation Modal */}
-            {showLiveConfirm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-                    <div className="bg-[#1a1f26] rounded-lg p-6 max-w-md w-full mx-4 border border-[#2d3640]">
-                        <h3 className="text-lg font-semibold text-white mb-2">⚠️ Enable LIVE Trading</h3>
-                        <p className="text-[#8b98a5] mb-4">
-                            You are about to switch to LIVE mode. This will:
-                        </p>
-                        <ul className="text-sm text-[#8b98a5] mb-6 space-y-2">
-                            <li>• Execute real orders on the exchange</li>
-                            <li>• Use actual funds from your account</li>
-                            <li>• Lock risk limits to read-only</li>
-                        </ul>
-                        <div className="flex gap-3 justify-end">
-                            <button
-                                onClick={() => setShowLiveConfirm(false)}
-                                className="px-4 py-2 rounded-md text-sm text-[#8b98a5] hover:bg-[#242b33]"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmLiveMode}
-                                className="px-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-700"
-                            >
-                                I Understand, Enable LIVE
-                            </button>
+                {/* API Connection Status */}
+                <div className="card">
+                    <div className="card-header">
+                        <span className="card-title">API Connection</span>
+                    </div>
+
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between py-2">
+                            <span className="text-[#8b98a5]">Exchange</span>
+                            <span className="text-[#e7e9ea]">{settingsData.apiConnection.exchange}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-2">
+                            <span className="text-[#8b98a5]">Status</span>
+                            <span className="badge badge-success">
+                                {settingsData.apiConnection.status.toUpperCase()}
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between py-2">
+                            <span className="text-[#8b98a5]">Latency</span>
+                            <span className="text-[#e7e9ea]">{settingsData.apiConnection.lastPing}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-2">
+                            <span className="text-[#8b98a5]">Network</span>
+                            <span className="badge badge-neutral">
+                                {settingsData.apiConnection.testnet ? 'TESTNET' : 'MAINNET'}
+                            </span>
                         </div>
                     </div>
                 </div>
-            )}
+
+                {/* Risk Limits (Read-Only) */}
+                <div className="card lg:col-span-2">
+                    <div className="card-header">
+                        <span className="card-title">Risk Limits (Read-Only)</span>
+                        <span className="badge badge-neutral">Configured in Code</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Daily Loss Limit</span>
+                            <span className="value-md block mt-1">${settingsData.riskLimits.dailyLossLimit}</span>
+                        </div>
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Weekly Loss Limit</span>
+                            <span className="value-md block mt-1">${settingsData.riskLimits.weeklyLossLimit}</span>
+                        </div>
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Max Drawdown</span>
+                            <span className="value-md block mt-1">{settingsData.riskLimits.maxDrawdown}%</span>
+                        </div>
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Max Positions</span>
+                            <span className="value-md block mt-1">{settingsData.riskLimits.maxPositions}</span>
+                        </div>
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Max Exposure</span>
+                            <span className="value-md block mt-1">${settingsData.riskLimits.maxExposure}</span>
+                        </div>
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Trades/Day</span>
+                            <span className="value-md block mt-1">{settingsData.riskLimits.tradesPerDay}</span>
+                        </div>
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Trades/Context</span>
+                            <span className="value-md block mt-1">{settingsData.riskLimits.tradesPerContext}</span>
+                        </div>
+                        <div className="bg-[#1a1f26] rounded-md p-4">
+                            <span className="label block">Losses/Bias</span>
+                            <span className="value-md block mt-1">{settingsData.riskLimits.lossesPerBias}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Kill Switch */}
+                <div className="card lg:col-span-2 border-[#a65454]">
+                    <div className="card-header">
+                        <span className="card-title text-[#a65454]">Emergency Kill Switch</span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-[#e7e9ea]">Immediately halt all trading operations</p>
+                            <p className="text-sm text-[#6b7280] mt-1">
+                                This will cancel all pending orders and prevent new trades.
+                                Requires double confirmation.
+                            </p>
+                        </div>
+                        <button
+                            onClick={handleKillSwitch}
+                            className={`btn ${killSwitchStep === 0 ? 'btn-danger' : 'bg-[#c44444] text-white'} px-6`}
+                        >
+                            {killSwitchStep === 0 && 'KILL SWITCH'}
+                            {killSwitchStep === 1 && 'CONFIRM KILL'}
+                            {killSwitchStep === 2 && 'ACTIVATED'}
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

@@ -2,19 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Base styles with plain CSS fallback */
+/* 
+ * CryptoBoss Professional Trading Dashboard
+ * Theme: Control Room Aesthetic
+ * Philosophy: Safety, clarity, explainability over hype
+ */
+
 :root {
+  /* Background hierarchy */
   --bg-primary: #0f1419;
   --bg-secondary: #1a1f26;
   --bg-tertiary: #242b33;
+  --bg-elevated: #2d3640;
+
+  /* Border */
   --border-color: #2d3640;
+  --border-subtle: #1e252d;
+
+  /* Text */
   --text-primary: #e7e9ea;
   --text-secondary: #8b98a5;
   --text-muted: #6b7280;
-  --accent-blue: #3b82f6;
-  --accent-green: #22c55e;
-  --accent-red: #ef4444;
-  --accent-yellow: #eab308;
+  --text-dim: #4a5568;
+
+  /* Accent - Muted Blue (per spec) */
+  --accent-primary: #5b7a9d;
+  --accent-primary-dim: rgba(91, 122, 157, 0.15);
+
+  /* Status colors - Muted, non-celebratory (per spec) */
+  --success: #4a9268;
+  --success-dim: rgba(74, 146, 104, 0.15);
+  --warning: #c4a052;
+  --warning-dim: rgba(196, 160, 82, 0.15);
+  --danger: #a65454;
+  --danger-dim: rgba(166, 84, 84, 0.15);
+  --neutral: #6b7280;
+  --neutral-dim: rgba(107, 114, 128, 0.15);
+
+  /* Gauges and progress */
+  --gauge-bg: #1a1f26;
+  --gauge-track: #2d3640;
+
+  /* Spacing scale */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
 }
 
 /* Force dark theme */
@@ -30,72 +64,488 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  line-height: 1.5;
 }
 
-/* Ensure SVGs have proper sizing */
-svg {
-  display: inline-block;
-  vertical-align: middle;
+/* ============================================
+   TYPOGRAPHY
+   ============================================ */
+
+.heading-lg {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
 
-/* Force SVG icons to respect dimensions */
-.w-5 {
-  width: 1.25rem !important;
+.heading-md {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
-.h-5 {
-  height: 1.25rem !important;
+.heading-sm {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.w-6 {
-  width: 1.5rem !important;
+.value-xl {
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
-.h-6 {
-  height: 1.5rem !important;
+.value-lg {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
-.w-2\.5 {
-  width: 0.625rem !important;
+.value-md {
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
-.h-2\.5 {
-  height: 0.625rem !important;
+.label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.w-2 {
-  width: 0.5rem !important;
+/* ============================================
+   CARDS & CONTAINERS
+   ============================================ */
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: var(--space-lg);
 }
 
-.h-2 {
-  height: 0.5rem !important;
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
 }
 
-.w-3 {
-  width: 0.75rem !important;
+.card-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.h-3 {
-  height: 0.75rem !important;
+/* ============================================
+   GAUGES & PROGRESS BARS
+   ============================================ */
+
+.gauge {
+  height: 0.375rem;
+  background: var(--gauge-track);
+  border-radius: 9999px;
+  overflow: hidden;
 }
 
-.w-10 {
-  width: 2.5rem !important;
+.gauge-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.3s ease;
 }
 
-.h-10 {
-  height: 2.5rem !important;
+.gauge-fill-success {
+  background: var(--success);
 }
 
-.w-12 {
-  width: 3rem !important;
+.gauge-fill-warning {
+  background: var(--warning);
 }
 
-.h-12 {
-  height: 3rem !important;
+.gauge-fill-danger {
+  background: var(--danger);
 }
 
-/* Custom scrollbar */
+.gauge-fill-neutral {
+  background: var(--neutral);
+}
+
+.gauge-fill-accent {
+  background: var(--accent-primary);
+}
+
+/* Vertical gauge for drawdown */
+.gauge-vertical {
+  width: 0.375rem;
+  height: 4rem;
+  background: var(--gauge-track);
+  border-radius: 9999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.gauge-vertical-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-radius: 9999px;
+  transition: height 0.3s ease;
+}
+
+/* ============================================
+   STATUS INDICATORS
+   ============================================ */
+
+.status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+}
+
+.status-dot-healthy {
+  background: var(--success);
+}
+
+.status-dot-warning {
+  background: var(--warning);
+}
+
+.status-dot-critical {
+  background: var(--danger);
+}
+
+.status-dot-neutral {
+  background: var(--neutral);
+}
+
+/* No pulse/flash animations per spec */
+
+/* ============================================
+   BADGES
+   ============================================ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge-success {
+  background: var(--success-dim);
+  color: var(--success);
+}
+
+.badge-warning {
+  background: var(--warning-dim);
+  color: var(--warning);
+}
+
+.badge-danger {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+.badge-neutral {
+  background: var(--neutral-dim);
+  color: var(--text-secondary);
+}
+
+.badge-accent {
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+}
+
+/* ============================================
+   TOOLTIPS
+   ============================================ */
+
+.tooltip-container {
+  position: relative;
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 50;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  bottom: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tooltip-container:hover .tooltip {
+  opacity: 1;
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #6b8aad;
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #b66464;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Kill switch - requires extra attention */
+.btn-killswitch {
+  background: var(--danger);
+  color: white;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.btn-killswitch:hover {
+  background: #b66464;
+}
+
+/* ============================================
+   TABLES
+   ============================================ */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.table td {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.table tr:hover td {
+  background: var(--bg-tertiary);
+}
+
+/* ============================================
+   TIMELINE
+   ============================================ */
+
+.timeline {
+  position: relative;
+  padding-left: 1.5rem;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 0.25rem;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-color);
+}
+
+.timeline-item {
+  position: relative;
+  padding-bottom: 1.5rem;
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -1.25rem;
+  top: 0.25rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--border-color);
+}
+
+.timeline-item-success::before {
+  background: var(--success);
+}
+
+.timeline-item-warning::before {
+  background: var(--warning);
+}
+
+.timeline-item-danger::before {
+  background: var(--danger);
+}
+
+/* ============================================
+   EMPTY STATES
+   ============================================ */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty-state-icon {
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.empty-state-title {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.empty-state-description {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+.text-success {
+  color: var(--success);
+}
+
+.text-warning {
+  color: var(--warning);
+}
+
+.text-danger {
+  color: var(--danger);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-secondary {
+  color: var(--text-secondary);
+}
+
+.bg-success-dim {
+  background: var(--success-dim);
+}
+
+.bg-warning-dim {
+  background: var(--warning-dim);
+}
+
+.bg-danger-dim {
+  background: var(--danger-dim);
+}
+
+/* Grid helpers */
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 1024px) {
+
+  .grid-3,
+  .grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+
+  .grid-2,
+  .grid-3,
+  .grid-4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -113,3 +563,17 @@ svg {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* ============================================
+   TRANSITIONS (subtle only per spec)
+   ============================================ */
+
+.transition-subtle {
+  transition: all 0.15s ease;
+}
+
+.transition-fade {
+  transition: opacity 0.2s ease;
+}
+
+/* NO flashing, pulsing, or celebratory effects */

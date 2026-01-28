@@ -214,6 +214,73 @@ See `configs/` directory for strategy-specific YAML files:
 
 ---
 
+## 🔌 Binance Testnet Configuration
+
+CryptoBoss supports both Binance Testnet and Live environments. **Always test on testnet first!**
+
+### Getting Testnet API Keys
+
+1. Go to [Binance Testnet](https://testnet.binance.vision/)
+2. Log in with your GitHub account
+3. Click "Generate HMAC_SHA256 Key"
+4. Copy the API Key and Secret Key
+
+### Environment Variables
+
+```env
+# Binance API Configuration
+BINANCE_API_KEY=your_testnet_or_live_api_key
+BINANCE_API_SECRET=your_testnet_or_live_api_secret
+
+# Testnet Mode (set to 'true' for testnet, 'false' for live)
+BINANCE_TESTNET_ENABLED=true
+```
+
+### Endpoints Used
+
+| Environment | REST Endpoint | WebSocket Endpoint |
+|-------------|---------------|-------------------|
+| **Testnet** | `https://testnet.binance.vision/api` | `wss://testnet.binance.vision/ws` |
+| **Live** | `https://api.binance.com/api` | `wss://stream.binance.com:9443/ws` |
+
+### Testing Your Connection
+
+```python
+import asyncio
+from src.exchange.binance_client import test_binance_connection
+
+async def main():
+    result = await test_binance_connection(testnet=True)
+    if result["success"]:
+        print(f"✅ Connected to {result['environment']}")
+        print(f"   Balances: {result['balances']}")
+    else:
+        print(f"❌ Failed: {result['message']}")
+
+asyncio.run(main())
+```
+
+### Expected Output (Successful)
+
+```
+BinanceClient initialized (TESTNET)
+  REST endpoint: https://testnet.binance.vision
+  WebSocket endpoint: wss://testnet.binance.vision/ws
+Credentials validated (testnet). Found 2 assets.
+✅ Connected to testnet
+   Balances: {'BTC': 1.0, 'USDT': 10000.0}
+```
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Invalid signature" | Using testnet keys on live or vice versa | Ensure `BINANCE_TESTNET_ENABLED` matches your key type |
+| "API key format invalid" | Malformed or incomplete key | Re-copy the full key from Binance |
+| "Timestamp out of recv window" | Clock sync issue | System clock should be accurate (within 10 seconds) |
+
+---
+
 ## 🧪 Testing
 
 ### Run All Tests
