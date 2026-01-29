@@ -236,6 +236,64 @@ except ImportError:
     get_config_guard = None
 
 # ============================================================================
+# v10.4-TRUST-GRADE Modules
+# ============================================================================
+
+try:
+    from .environment_guard import (
+        EnvironmentGuard,
+        EnvironmentMode,
+        EnvironmentSignature,
+        get_environment_guard,
+    )
+except ImportError:
+    EnvironmentGuard = None
+    EnvironmentMode = None
+    EnvironmentSignature = None
+    get_environment_guard = None
+
+try:
+    from .data_authenticity import (
+        DataAuthenticityGuard,
+        AuthenticData,
+        DataSource,
+        AuthenticityStatus,
+        get_auth_guard,
+    )
+except ImportError:
+    DataAuthenticityGuard = None
+    AuthenticData = None
+    DataSource = None
+    AuthenticityStatus = None
+    get_auth_guard = None
+
+try:
+    from .decision_narrative import (
+        NarrativeEngine,
+        DecisionNarrative,
+        NarrativeType,
+        get_narrative_engine,
+    )
+except ImportError:
+    NarrativeEngine = None
+    DecisionNarrative = None
+    NarrativeType = None
+    get_narrative_engine = None
+
+try:
+    from .cold_start import (
+        ColdStartManager,
+        StartupState,
+        StartupStep,
+        get_cold_start_manager,
+    )
+except ImportError:
+    ColdStartManager = None
+    StartupState = None
+    StartupStep = None
+    get_cold_start_manager = None
+
+# ============================================================================
 # Database Layer (v11.0)
 # ============================================================================
 
