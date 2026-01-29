@@ -81,6 +81,41 @@ class TradingEngine:
         self.config = config or EngineConfig(mode=mode, portfolio_value=portfolio_value)
         self.status = EngineStatus.STOPPED
         
+        # v11.1: Environment Truth - Generate signature at startup
+        try:
+            from .environment_guard import get_environment_guard
+            self._env_guard = get_environment_guard()
+            if not self._env_guard._initialized:
+                exchange_url = "https://api.binance.com" if mode == "live" else "https://testnet.binance.vision"
+                self._env_signature = self._env_guard.initialize(
+                    mode=mode,
+                    exchange_id="binance",
+                    exchange_url=exchange_url,
+                    config={"portfolio_value": portfolio_value, "mode": mode}
+                )
+            else:
+                self._env_signature = self._env_guard.get_signature()
+        except Exception as e:
+            logger.warning(f"Environment guard init skipped: {e}")
+            self._env_guard = None
+            self._env_signature = None
+        
+        # v11.1: Incident State Machine
+        try:
+            from .incident_state_machine import get_incident_state_machine
+            self._incident_sm = get_incident_state_machine()
+        except Exception as e:
+            logger.warning(f"Incident state machine init skipped: {e}")
+            self._incident_sm = None
+        
+        # v11.1: Decision Narrative Engine
+        try:
+            from .decision_narrative import get_narrative_engine
+            self._narrative_engine = get_narrative_engine()
+        except Exception as e:
+            logger.warning(f"Narrative engine init skipped: {e}")
+            self._narrative_engine = None
+        
         # Core components
         self.state_manager = get_state_manager()
         self.event_bus = get_event_bus()
@@ -102,7 +137,7 @@ class TradingEngine:
         self._running = False
         self._tasks: List[asyncio.Task] = []
         
-        logger.info(f"TradingEngine initialized in {mode} mode with ${portfolio_value:,.2f}")
+        logger.info(f"TradingEngine initialized in {mode.upper()} mode with ${portfolio_value:,.2f}")
     
     def add_strategy(
         self,

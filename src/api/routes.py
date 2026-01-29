@@ -44,8 +44,8 @@ except ImportError as e:
 
 app = FastAPI(
     title="CryptoBoss API",
-    version="11.0.0",
-    description="Production-Grade Trading Platform API"
+    version="11.1.0",
+    description="Production-Grade Trading Platform API - FINAL-MAP"
 )
 
 # CORS
@@ -56,6 +56,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# v11.1: Import environment and authenticity guards
+try:
+    from src.core.environment_guard import get_environment_guard
+    from src.core.data_authenticity import DataSource
+    from src.core.decision_narrative import get_narrative_engine
+except ImportError:
+    get_environment_guard = None
+    DataSource = None
+    get_narrative_engine = None
+
+def get_env_signature() -> Optional[Dict]:
+    """Get current environment signature for API responses."""
+    if get_environment_guard is None:
+        return None
+    try:
+        guard = get_environment_guard()
+        if guard._initialized:
+            return guard.get_signature().to_dict()
+    except:
+        pass
+    return None
+
+def attach_signature(response: Dict) -> Dict:
+    """Attach environment signature to any API response."""
+    sig = get_env_signature()
+    if sig:
+        response["_environment"] = sig
+    response["_timestamp"] = datetime.utcnow().isoformat()
+    return response
 
 # Shared state
 trading_state = {
