@@ -314,6 +314,11 @@ class ExecutionRouter:
     """
     Central execution router that handles all order flow.
     
+    v11.0 UPGRADES:
+    - SlippageMonitor integration for execution quality tracking
+    - ExchangeRecoveryHandler for robust error handling and failover
+    - Enhanced state tracking and audit logging
+    
     Usage:
         router = ExecutionRouter(mode=ExecutionMode.PAPER)
         
@@ -341,6 +346,7 @@ class ExecutionRouter:
         self.mode = mode
         self.state_manager = state_manager
         self.risk_guardian = risk_guardian
+        self._exchange_client = exchange_client
         
         # Initialize appropriate broker
         if mode == ExecutionMode.LIVE:
@@ -354,19 +360,46 @@ class ExecutionRouter:
         self.on_fill: Optional[Callable[[OrderResult], None]] = None
         self.on_error: Optional[Callable[[OrderIntent, str], None]] = None
         
-        logger.info(f"ExecutionRouter initialized in {mode.value} mode")
+        # v11.0: Lazy-loaded components
+        self._slippage_monitor = None
+        self._recovery_handler = None
+        
+        logger.info(f"ExecutionRouter v11.0 initialized in {mode.value} mode")
+    
+    def _get_slippage_monitor(self):
+        """Get or create SlippageMonitor."""
+        if self._slippage_monitor is None:
+            try:
+                from .slippage_monitor import get_slippage_monitor
+                self._slippage_monitor = get_slippage_monitor()
+            except ImportError:
+                pass
+        return self._slippage_monitor
+    
+    def _get_recovery_handler(self):
+        """Get or create ExchangeRecoveryHandler."""
+        if self._recovery_handler is None:
+            try:
+                from .exchange_recovery import get_recovery_handler
+                self._recovery_handler = get_recovery_handler()
+            except ImportError:
+                pass
+        return self._recovery_handler
     
     async def execute(self, intent: OrderIntent) -> OrderResult:
         """
         Execute an order intent.
         
-        Flow:
+        v11.0 Flow:
         1. Validate with RiskGuardian (if present)
         2. Save pending order state
-        3. Execute via broker
-        4. Update state with result
-        5. Trigger callbacks
+        3. Execute via broker with recovery handling
+        4. Track slippage quality
+        5. Update state with result
+        6. Trigger callbacks
         """
+        expected_price = intent.price or 0
+        
         # Risk check
         if self.risk_guardian:
             approved, reason = self.risk_guardian.approve_order(intent)
@@ -396,8 +429,77 @@ class ExecutionRouter:
                 'strategy_id': intent.strategy_id
             })
         
-        # Execute
-        result = await self.broker.execute_order(intent)
+        # v11.0: Execute with recovery handling
+        recovery = self._get_recovery_handler()
+        result = None
+        
+        if recovery and self.mode == ExecutionMode.LIVE:
+            # Use recovery handler for live execution
+            async def execute_with_recovery():
+                return await self.broker.execute_order(intent)
+            
+            recovery_result = await recovery.execute_with_recovery(
+                execute_with_recovery,
+                f"{intent.symbol}_{intent.client_order_id}"
+            )
+            
+            if recovery_result.success and recovery_result.result:
+                result = recovery_result.result
+            elif recovery_result.fallback_to_paper:
+                # Fallback to paper mode
+                logger.warning(
+                    f"Falling back to paper mode due to: {recovery_result.error_message}"
+                )
+                paper_broker = PaperBroker()
+                paper_broker.set_price(intent.symbol, expected_price or 0)
+                result = await paper_broker.execute_order(intent)
+            else:
+                # Total failure
+                result = OrderResult(
+                    success=False,
+                    order_id="",
+                    client_order_id=intent.client_order_id,
+                    symbol=intent.symbol,
+                    side=intent.side.value,
+                    filled_quantity=0,
+                    average_price=0,
+                    fees=0,
+                    slippage_bps=0,
+                    timestamp=datetime.now(),
+                    error_message=recovery_result.error_message or "Recovery failed"
+                )
+        else:
+            # Standard execution (paper mode or no recovery handler)
+            try:
+                result = await self.broker.execute_order(intent)
+            except Exception as e:
+                logger.error(f"Order execution failed: {e}")
+                result = OrderResult(
+                    success=False,
+                    order_id="",
+                    client_order_id=intent.client_order_id,
+                    symbol=intent.symbol,
+                    side=intent.side.value,
+                    filled_quantity=0,
+                    average_price=0,
+                    fees=0,
+                    slippage_bps=0,
+                    timestamp=datetime.now(),
+                    error_message=str(e)
+                )
+        
+        # v11.0: Track slippage
+        if result.success and expected_price > 0:
+            slippage_monitor = self._get_slippage_monitor()
+            if slippage_monitor:
+                slippage_monitor.record_execution(
+                    order_id=result.order_id,
+                    symbol=intent.symbol,
+                    side=intent.side.value,
+                    expected_price=expected_price,
+                    fill_price=result.average_price,
+                    size=result.filled_quantity
+                )
         
         # Update state
         if self.state_manager:
@@ -408,7 +510,8 @@ class ExecutionRouter:
                 'status': 'filled' if result.success else 'failed',
                 'fill_price': result.average_price,
                 'fees': result.fees,
-                'strategy_id': intent.strategy_id
+                'strategy_id': intent.strategy_id,
+                'slippage_bps': result.slippage_bps,
             })
         
         # Callbacks

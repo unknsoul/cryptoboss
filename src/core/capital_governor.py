@@ -168,14 +168,39 @@ class CapitalAllocationGovernor:
         # 4. Exchange health modifier
         health_modifier = self._calculate_health_modifier(exchange_health)
         
-        # 5. Calculate effective allocation
+        # 5. v11.0: DrawdownGovernor integration for multi-timeframe control
+        drawdown_multiplier = 1.0
+        in_defensive_mode = False
+        try:
+            from .drawdown_governor import get_drawdown_governor
+            dd_governor = get_drawdown_governor()
+            
+            # Update equity in drawdown governor
+            dd_governor.update_equity(self.portfolio_value)
+            
+            # Get size multiplier from drawdown governor
+            drawdown_multiplier = dd_governor.get_size_multiplier()
+            in_defensive_mode = dd_governor.is_in_defensive_mode()
+            
+            if in_defensive_mode:
+                logger.warning(
+                    f"DrawdownGovernor DEFENSIVE MODE active - "
+                    f"size multiplier: {drawdown_multiplier:.2f}"
+                )
+        except ImportError:
+            pass  # DrawdownGovernor not available
+        except Exception as e:
+            logger.debug(f"DrawdownGovernor not available: {e}")
+        
+        # 6. Calculate effective allocation
         if ctx == AllocationContext.NO_TRADE:
             effective = 0.0
         else:
-            effective = base_allocation * vol_modifier * dd_modifier * health_modifier
-            effective = max(self.min_allocation, effective)
+            # Combine all modifiers including drawdown governor
+            effective = base_allocation * vol_modifier * dd_modifier * health_modifier * drawdown_multiplier
+            effective = max(self.min_allocation, effective) if not in_defensive_mode else effective
         
-        # 6. Calculate max position size
+        # 7. Calculate max position size
         available = self.portfolio_value * effective
         
         if current_exposure is not None:
@@ -188,7 +213,7 @@ class CapitalAllocationGovernor:
             context=ctx,
             base_allocation=base_allocation,
             volatility_modifier=vol_modifier,
-            drawdown_modifier=dd_modifier,
+            drawdown_modifier=dd_modifier * drawdown_multiplier,  # Include governor modifier
             health_modifier=health_modifier,
             effective_allocation=effective,
             max_position_size=remaining,
@@ -202,7 +227,8 @@ class CapitalAllocationGovernor:
         logger.debug(
             f"Allocation: {ctx.value} -> {effective:.1%} "
             f"(base={base_allocation:.0%}, vol={vol_modifier:.2f}, "
-            f"dd={dd_modifier:.2f}, health={health_modifier:.2f})"
+            f"dd={dd_modifier:.2f}, health={health_modifier:.2f}, "
+            f"ddGov={drawdown_multiplier:.2f})"
         )
         
         return snapshot

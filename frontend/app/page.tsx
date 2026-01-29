@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -12,6 +13,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
  * - No charts
  * - Large readable values
  * - Neutral colors only
+ * - v10.2: Safety metrics displayed BEFORE profit metrics
  */
 
 function Tooltip({ text, children }: { text: string; children: React.ReactNode }) {
@@ -26,14 +28,16 @@ function Tooltip({ text, children }: { text: string; children: React.ReactNode }
 function StatCard({
     title,
     tooltip,
+    className = '',
     children
 }: {
     title: string;
     tooltip?: string;
+    className?: string;
     children: React.ReactNode;
 }) {
     return (
-        <div className="card">
+        <div className={`card ${className}`}>
             <div className="card-header">
                 {tooltip ? (
                     <Tooltip text={tooltip}>
@@ -94,6 +98,18 @@ export default function OverviewPage() {
         capital: { allocated: 0, available: 0, total: 0 },
         drawdown: { current: 0, daily: 0, maxAllowed: 10 },
         tradeBudget: { remaining: 0, total: 0, perContext: 0 }
+    });
+
+    // v10.2: Safety metrics (displayed BEFORE profit metrics)
+    const [safetyMetrics, setSafetyMetrics] = useState({
+        no_trade_rate: 0.32,
+        permission_rejection_rate: 0.15,
+        capital_veto_rate: 0.08,
+        exchange_degradation_count: 1,
+        incident_freeze_count: 0,
+        halt_count: 0,
+        incident_state: 'normal' as 'normal' | 'degraded' | 'incident_freeze' | 'halted',
+        is_paused: false
     });
 
 
@@ -179,6 +195,22 @@ export default function OverviewPage() {
         return 'neutral';
     };
 
+    const getIncidentStateColor = (state: string) => {
+        switch (state) {
+            case 'normal': return 'badge-success';
+            case 'degraded': return 'badge-warning';
+            case 'incident_freeze': return 'badge-danger';
+            case 'halted': return 'badge-danger';
+            default: return 'badge-neutral';
+        }
+    };
+
+    const getRateVariant = (rate: number): 'success' | 'warning' | 'danger' => {
+        if (rate < 0.2) return 'success';
+        if (rate < 0.5) return 'warning';
+        return 'danger';
+    };
+
     // Skeleton loading component
     function SkeletonCard() {
         return (
@@ -225,6 +257,84 @@ export default function OverviewPage() {
                 <p className="text-[#8b98a5] text-sm">
                     High-level system health snapshot — understand status in 10 seconds
                 </p>
+            </div>
+
+            {/* v10.2: Safety Metrics Section (BEFORE profit metrics) */}
+            <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-4 h-4 text-[#c9a227]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <h2 className="text-sm font-medium text-[#c9a227] uppercase tracking-wider">Safety Metrics</h2>
+                    <Link href="/operator" className="ml-auto text-xs text-[#5b7a9d] hover:text-[#7a99bd] transition-colors">
+                        Operator Control →
+                    </Link>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    {/* Incident State */}
+                    <div className="card p-3">
+                        <div className="text-xs text-[#6b7280] mb-1">Incident State</div>
+                        <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${safetyMetrics.incident_state === 'normal' ? 'bg-[#4a9268]' :
+                                    safetyMetrics.incident_state === 'degraded' ? 'bg-[#c9a227]' :
+                                        'bg-[#e06c75]'
+                                }`} />
+                            <span className={`badge ${getIncidentStateColor(safetyMetrics.incident_state)}`}>
+                                {safetyMetrics.incident_state.toUpperCase().replace('_', ' ')}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* No Trade Rate */}
+                    <div className="card p-3">
+                        <div className="text-xs text-[#6b7280] mb-1">No Trade Rate</div>
+                        <div className={`text-lg font-mono ${getRateVariant(safetyMetrics.no_trade_rate) === 'success' ? 'text-[#4a9268]' :
+                                getRateVariant(safetyMetrics.no_trade_rate) === 'warning' ? 'text-[#c9a227]' :
+                                    'text-[#e06c75]'
+                            }`}>
+                            {(safetyMetrics.no_trade_rate * 100).toFixed(1)}%
+                        </div>
+                    </div>
+
+                    {/* Permission Rejection */}
+                    <div className="card p-3">
+                        <div className="text-xs text-[#6b7280] mb-1">Permission Rejections</div>
+                        <div className={`text-lg font-mono ${getRateVariant(safetyMetrics.permission_rejection_rate) === 'success' ? 'text-[#4a9268]' :
+                                getRateVariant(safetyMetrics.permission_rejection_rate) === 'warning' ? 'text-[#c9a227]' :
+                                    'text-[#e06c75]'
+                            }`}>
+                            {(safetyMetrics.permission_rejection_rate * 100).toFixed(1)}%
+                        </div>
+                    </div>
+
+                    {/* Capital Vetoes */}
+                    <div className="card p-3">
+                        <div className="text-xs text-[#6b7280] mb-1">Capital Vetoes</div>
+                        <div className={`text-lg font-mono ${getRateVariant(safetyMetrics.capital_veto_rate) === 'success' ? 'text-[#4a9268]' :
+                                getRateVariant(safetyMetrics.capital_veto_rate) === 'warning' ? 'text-[#c9a227]' :
+                                    'text-[#e06c75]'
+                            }`}>
+                            {(safetyMetrics.capital_veto_rate * 100).toFixed(1)}%
+                        </div>
+                    </div>
+
+                    {/* Incidents Today */}
+                    <div className="card p-3">
+                        <div className="text-xs text-[#6b7280] mb-1">Incidents Today</div>
+                        <div className={`text-lg font-mono ${safetyMetrics.incident_freeze_count === 0 ? 'text-[#4a9268]' : 'text-[#e06c75]'
+                            }`}>
+                            {safetyMetrics.incident_freeze_count}
+                        </div>
+                    </div>
+
+                    {/* System Paused */}
+                    <div className="card p-3">
+                        <div className="text-xs text-[#6b7280] mb-1">System Status</div>
+                        <span className={`badge ${safetyMetrics.is_paused ? 'badge-warning' : 'badge-success'}`}>
+                            {safetyMetrics.is_paused ? 'PAUSED' : 'RUNNING'}
+                        </span>
+                    </div>
+                </div>
             </div>
 
             {/* Main Grid - 3 columns */}
@@ -414,22 +524,43 @@ export default function OverviewPage() {
 
             {/* System Status Banner */}
             <div className="card">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">
-                        <div className="status-dot status-dot-healthy" />
+                        <div className={`status-dot ${safetyMetrics.incident_state === 'normal' && !safetyMetrics.is_paused
+                                ? 'status-dot-healthy'
+                                : safetyMetrics.incident_state === 'degraded'
+                                    ? 'status-dot-warning'
+                                    : 'status-dot-error'
+                            }`} />
                         <span className="text-[#e7e9ea] font-medium">
-                            System Operating Normally
+                            {safetyMetrics.is_paused
+                                ? 'System Paused by Operator'
+                                : safetyMetrics.incident_state === 'normal'
+                                    ? 'System Operating Normally'
+                                    : safetyMetrics.incident_state === 'degraded'
+                                        ? 'System Degraded - Reduced Trading'
+                                        : 'System Halted - Operator Action Required'
+                            }
                         </span>
                         <span className="text-[#6b7280] text-sm">—</span>
                         <span className="text-[#8b98a5] text-sm">
                             NO_TRADE is a valid and normal state
                         </span>
                     </div>
-                    <span className="text-[#6b7280] text-sm">
-                        Last update: {lastUpdate}
-                    </span>
+                    <div className="flex items-center gap-4">
+                        <Link
+                            href="/incidents"
+                            className="text-xs text-[#5b7a9d] hover:text-[#7a99bd] transition-colors"
+                        >
+                            View Incidents
+                        </Link>
+                        <span className="text-[#6b7280] text-sm">
+                            Last update: {lastUpdate}
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
     );
 }
+

@@ -1,171 +1,315 @@
 """
-CryptoBoss Core Module
+CryptoBoss v11.0 - Production-Grade Trading Platform
 
-Clean, professional, institutional-grade architecture components.
-Professional discretionary trader architecture implemented.
+A context-first, risk-governed, event-driven autonomous trading engine.
+
+Core Philosophy:
+- No Direct Orders: Strategies produce TradeIntent, never direct orders
+- Risk Sovereignty: Risk engine has veto over all trade intents
+- ML Containment: ML is advisory only, cannot generate proposals
+- Zero Bypass: Every trade passes through all 10 pipeline stages
+- Full Auditability: Every decision logged with complete context
+- Operator Control: Critical actions require operator acknowledgment
+
+Version: 11.0-FINAL
 """
 
-# === Core Architecture ===
-from .state_manager import StateManager, get_state_manager, StrategyState
-from .execution_router import (
-    ExecutionRouter, ExecutionMode, OrderIntent, OrderResult,
-    OrderSide, OrderType, PaperBroker, LiveBroker
-)
-from .risk_guardian import RiskGuardian, RiskLimits, get_risk_guardian
-from .event_bus import (
-    EventBus, Event, EventType, get_event_bus,
-    emit_price_tick, emit_order_filled, emit_signal, emit_risk_breach
-)
-from .engine import TradingEngine, create_engine, EngineStatus, EngineConfig
+# ============================================================================
+# v11.0 Trade Intent/Decision Pipeline
+# ============================================================================
 
-# === Professional Decision Architecture ===
-from .market_context_engine import (
-    MarketContextEngine, MarketContext, MarketRegime, LiquidityMetrics,
-    get_market_context_engine
-)
-from .bias_engine import (
-    BiasEngine, BiasState, TradeBias, get_bias_engine
-)
-from .trade_permission_filter import (
-    TradePermissionFilter, PermissionResult, PermissionDenialReason,
-    get_permission_filter
-)
-from .decision_logger import (
-    DecisionLogger, DecisionLog, DecisionType, get_decision_logger
+from .trade_intent import (
+    TradeIntent,
+    IntentDirection,
+    IntentPriority,
+    TradeIntentValidator,
 )
 
-# === Phase 6: Live Readiness Hardening ===
-from .context_state_machine import (
-    ContextStateMachine, ContextState, ContextTransitionEvent,
-    ContextStateSnapshot, get_context_state_machine, VALID_TRANSITIONS
-)
-from .risk_state_persistence import (
-    RiskStatePersistence, PersistedRiskState, get_risk_persistence
-)
-from .trade_budget_manager import (
-    TradeBudgetManager, BudgetLimits, BudgetStatus, BudgetType,
-    get_budget_manager
-)
-from .proposal_scorer import (
-    ProposalScorer, ScoredProposal, StrategyHealth, get_proposal_scorer
-)
-from .exchange_health_monitor import (
-    ExchangeHealthMonitor, ExchangeHealthSnapshot, HealthLevel,
-    EscalationStage, ESCALATION_ORDER, get_exchange_monitor
-)
-from .cold_start_controller import (
-    ColdStartController, ColdStartPhase, ColdStartStatus,
-    get_cold_start_controller, reset_cold_start_controller
-)
-from .replay_engine import (
-    DeterministicReplayEngine, ReplaySession, ReplayEvent, ReplayDecision,
-    ReplayMismatch, get_replay_engine
+from .trade_decision import (
+    TradeDecision,
+    DecisionStatus,
+    RejectionStage,
+    RiskState,
+    ExecutionParams,
+    StageResultRecord,
+    DecisionStore,
+    get_decision_store,
 )
 
-# === Phase 7: Production Finalization v10.0 ===
-from .scoring_contract import (
-    ScoringContract, ContractValidatedProposal, ScoreBreakdown,
-    ScoreComponent, COMPONENT_WEIGHTS, get_scoring_contract
-)
-from .ml_containment import (
-    MLContainmentManager, MLFeatureOutput, MLInfluenceLog,
-    MLOutputType, MLContainmentError, get_ml_containment
-)
-from .capital_governor import (
-    CapitalAllocationGovernor, AllocationSnapshot, AllocationContext,
-    DEFAULT_CONTEXT_ALLOCATIONS, get_capital_governor
-)
+# ============================================================================
+# Execution Flow Orchestrator
+# ============================================================================
 
-# === Phase 8: v10.1-FINAL Zero Bypass ===
-from .bias_pre_filter import (
-    BiasPreFilter, BiasFilterResult, FilteredProposal,
-    FilterReason, get_bias_pre_filter
-)
 from .execution_flow import (
-    ExecutionFlowOrchestrator, FlowResult, FlowStage, FlowStatus,
-    StageResult, STAGE_ORDER, STAGE_NAMES, get_execution_flow
+    ExecutionFlowOrchestrator,
+    FlowStage,
+    FlowResult,
+    get_execution_flow,
 )
 
-# === Phase 1: Core Stability ===
-from .exchange_state import ExchangeStateManager, get_exchange_state, OpenOrder
-from .portfolio_risk import PortfolioRiskModel, get_portfolio_risk, RiskMetrics
-from .integration_hub import IntegrationHub, get_integration_hub, BaseIntegration
-from .persistent_event_bus import PersistentEventBus, create_persistent_event_bus
+# ============================================================================
+# Risk Management
+# ============================================================================
 
-# === Phase 2: Production Operations ===
-from .data_validation import (
-    OHLCVCandle, PriceTick, OrderRequest, OrderResponse, Signal,
-    DataValidator, get_validator
+from .drawdown_governor import (
+    DrawdownGovernor,
+    DrawdownSeverity,
+    get_drawdown_governor,
 )
-from .graceful_shutdown import GracefulShutdown, get_shutdown_manager
-from .observability import ObservabilityManager, get_observability, Metrics
-from .secrets_manager import SecretsManager, get_secrets, require_secret
-from .config_manager import ConfigManager, get_config
 
-# === Phase 3: Advanced Features ===
-from .tax_integration import IntegratedTaxTracker, get_tax_tracker
+from .capital_governor import (
+    CapitalAllocationGovernor,
+    AllocationContext,
+    AllocationSnapshot,
+)
+
+from .portfolio_risk import (
+    PortfolioRiskModel,
+    PortfolioPosition,
+    RiskMetrics,
+    get_portfolio_risk,
+)
+
+try:
+    from .trade_permission_filter import (
+        TradePermissionFilter,
+        PermissionStatus,
+    )
+except ImportError:
+    TradePermissionFilter = None
+    PermissionStatus = None
+
+# ============================================================================
+# Execution Hardening
+# ============================================================================
+
+from .slippage_monitor import (
+    SlippageMonitor,
+    SlippageRecord,
+    get_slippage_monitor,
+)
+
+from .exchange_recovery import (
+    ExchangeRecoveryHandler,
+    RecoveryResult,
+    ErrorCategory,
+    get_recovery_handler,
+)
+
+from .execution_router import (
+    ExecutionRouter,
+    ExecutionMode,
+    OrderIntent,
+    OrderResult,
+)
+
+# ============================================================================
+# Market Context & Analysis
+# ============================================================================
+
+from .market_context_engine import (
+    MarketContextEngine,
+)
+
+try:
+    from .context_state_machine import (
+        ContextStateMachine,
+        ContextState,
+        get_context_state_machine,
+    )
+    # Alias for backward compatibility
+    MarketState = ContextState
+except ImportError:
+    ContextStateMachine = None
+    ContextState = None
+    MarketState = None
+    get_context_state_machine = None
+
+from .bias_engine import (
+    BiasEngine,
+)
+
+from .scoring_contract import (
+    ScoringContract,
+)
+
+# ============================================================================
+# Operator Controls (v10.2+)
+# ============================================================================
+
+try:
+    from .operator_control import (
+        OperatorControlLayer,
+        OperatorAction,
+        get_operator_control,
+    )
+except ImportError:
+    OperatorControlLayer = None
+    OperatorAction = None
+    get_operator_control = None
+
+try:
+    from .incident_state_machine import (
+        IncidentStateMachine,
+        IncidentState,
+        get_incident_state_machine,
+    )
+except ImportError:
+    IncidentStateMachine = None
+    IncidentState = None
+    get_incident_state_machine = None
+
+try:
+    from .safety_metrics import (
+        SafetyMetrics,
+        get_safety_metrics,
+    )
+except ImportError:
+    SafetyMetrics = None
+    get_safety_metrics = None
+
+try:
+    from .config_guard import (
+        ConfigGuard,
+    )
+except ImportError:
+    ConfigGuard = None
+
+try:
+    from .drift_detection import (
+        DriftDetector,
+    )
+except ImportError:
+    DriftDetector = None
+
+# ============================================================================
+# Database Layer (v11.0)
+# ============================================================================
+
+from .database import (
+    DatabaseManager,
+    DecisionRepository,
+    EventRepository,
+    StateRepository,
+    get_database,
+    get_decision_repository,
+    get_event_repository,
+    get_state_repository,
+)
+
+# ============================================================================
+# WebSocket (v11.0)
+# ============================================================================
+
+try:
+    from .websocket import (
+        WebSocketManager,
+        get_websocket_manager,
+    )
+except ImportError:
+    WebSocketManager = None
+    get_websocket_manager = None
+
+# ============================================================================
+# Exchange Integration
+# ============================================================================
+
+from .exchange_state import (
+    ExchangeStateManager,
+)
+
+from .exchange_health_monitor import (
+    ExchangeHealthMonitor,
+)
+
+# ============================================================================
+# Exports
+# ============================================================================
+
+__version__ = "11.0-FINAL"
 
 __all__ = [
-    # Core Architecture
-    "StateManager", "get_state_manager", "StrategyState",
-    "ExecutionRouter", "ExecutionMode", "OrderIntent", "OrderResult",
-    "OrderSide", "OrderType", "PaperBroker", "LiveBroker",
-    "RiskGuardian", "RiskLimits", "get_risk_guardian",
-    "EventBus", "Event", "EventType", "get_event_bus",
-    "emit_price_tick", "emit_order_filled", "emit_signal", "emit_risk_breach",
-    "TradingEngine", "create_engine", "EngineStatus", "EngineConfig",
+    # v11.0 Trade Intent/Decision
+    'TradeIntent',
+    'IntentDirection',
+    'IntentPriority',
+    'TradeIntentValidator',
+    'TradeDecision',
+    'DecisionStatus',
+    'RejectionStage',
+    'RiskState',
+    'ExecutionParams',
+    'StageResultRecord',
+    'DecisionStore',
+    'get_decision_store',
     
-    # Professional Decision Architecture
-    "MarketContextEngine", "MarketContext", "MarketRegime", "LiquidityMetrics",
-    "get_market_context_engine",
-    "BiasEngine", "BiasState", "TradeBias", "get_bias_engine",
-    "TradePermissionFilter", "PermissionResult", "PermissionDenialReason",
-    "get_permission_filter",
-    "DecisionLogger", "DecisionLog", "DecisionType", "get_decision_logger",
+    # Execution Flow
+    'ExecutionFlowOrchestrator',
+    'FlowStage',
+    'FlowResult',
+    'get_execution_flow',
     
-    # Phase 6: Live Readiness Hardening
-    "ContextStateMachine", "ContextState", "ContextTransitionEvent",
-    "ContextStateSnapshot", "get_context_state_machine", "VALID_TRANSITIONS",
-    "RiskStatePersistence", "PersistedRiskState", "get_risk_persistence",
-    "TradeBudgetManager", "BudgetLimits", "BudgetStatus", "BudgetType",
-    "get_budget_manager",
-    "ProposalScorer", "ScoredProposal", "StrategyHealth", "get_proposal_scorer",
-    "ExchangeHealthMonitor", "ExchangeHealthSnapshot", "HealthLevel",
-    "EscalationStage", "ESCALATION_ORDER", "get_exchange_monitor",
-    "ColdStartController", "ColdStartPhase", "ColdStartStatus",
-    "get_cold_start_controller", "reset_cold_start_controller",
-    "DeterministicReplayEngine", "ReplaySession", "ReplayEvent", "ReplayDecision",
-    "ReplayMismatch", "get_replay_engine",
+    # Risk Management
+    'DrawdownGovernor',
+    'DrawdownSeverity',
+    'get_drawdown_governor',
+    'CapitalAllocationGovernor',
+    'AllocationContext',
+    'AllocationSnapshot',
+    'PortfolioRiskModel',
+    'PortfolioPosition',
+    'RiskMetrics',
+    'get_portfolio_risk',
+    'TradePermissionFilter',
+    'PermissionStatus',
     
-    # Phase 7: Production Finalization v10.0
-    "ScoringContract", "ContractValidatedProposal", "ScoreBreakdown",
-    "ScoreComponent", "COMPONENT_WEIGHTS", "get_scoring_contract",
-    "MLContainmentManager", "MLFeatureOutput", "MLInfluenceLog",
-    "MLOutputType", "MLContainmentError", "get_ml_containment",
-    "CapitalAllocationGovernor", "AllocationSnapshot", "AllocationContext",
-    "DEFAULT_CONTEXT_ALLOCATIONS", "get_capital_governor",
+    # Execution Hardening
+    'SlippageMonitor',
+    'SlippageRecord',
+    'get_slippage_monitor',
+    'ExchangeRecoveryHandler',
+    'RecoveryResult',
+    'ErrorCategory',
+    'get_recovery_handler',
+    'ExecutionRouter',
+    'ExecutionMode',
+    'OrderIntent',
+    'OrderResult',
     
-    # Phase 8: v10.1-FINAL Zero Bypass
-    "BiasPreFilter", "BiasFilterResult", "FilteredProposal",
-    "FilterReason", "get_bias_pre_filter",
-    "ExecutionFlowOrchestrator", "FlowResult", "FlowStage", "FlowStatus",
-    "StageResult", "STAGE_ORDER", "STAGE_NAMES", "get_execution_flow",
+    # Market Context
+    'MarketContextEngine',
+    'ContextStateMachine',
+    'MarketState',
+    'BiasEngine',
+    'ScoringContract',
     
-    # Phase 1
-    "ExchangeStateManager", "get_exchange_state", "OpenOrder",
-    "PortfolioRiskModel", "get_portfolio_risk", "RiskMetrics",
-    "IntegrationHub", "get_integration_hub", "BaseIntegration",
-    "PersistentEventBus", "create_persistent_event_bus",
+    # Operator Controls
+    'OperatorControlLayer',
+    'OperatorAction',
+    'get_operator_control',
+    'IncidentStateMachine',
+    'IncidentState',
+    'get_incident_state_machine',
+    'SafetyMetrics',
+    'get_safety_metrics',
+    'ConfigGuard',
+    'DriftDetector',
     
-    # Phase 2
-    "OHLCVCandle", "PriceTick", "OrderRequest", "OrderResponse", "Signal",
-    "DataValidator", "get_validator",
-    "GracefulShutdown", "get_shutdown_manager",
-    "ObservabilityManager", "get_observability", "Metrics",
-    "SecretsManager", "get_secrets", "require_secret",
-    "ConfigManager", "get_config",
+    # Database
+    'DatabaseManager',
+    'DecisionRepository',
+    'EventRepository',
+    'StateRepository',
+    'get_database',
+    'get_decision_repository',
+    'get_event_repository',
+    'get_state_repository',
     
-    # Phase 3
-    "IntegratedTaxTracker", "get_tax_tracker",
+    # WebSocket
+    'WebSocketManager',
+    'get_websocket_manager',
+    
+    # Exchange
+    'ExchangeStateManager',
+    'ExchangeHealthMonitor',
 ]
-

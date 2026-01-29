@@ -1,6 +1,8 @@
 {
-  "/page": "app/page.js",
-  "/live/page": "app/live/page.js",
   "/decisions/page": "app/decisions/page.js",
-  "/strategies/page": "app/strategies/page.js"
+  "/strategies/page": "app/strategies/page.js",
+  "/page": "app/page.js",
+  "/operator/page": "app/operator/page.js",
+  "/drift/page": "app/drift/page.js",
+  "/incidents/page": "app/incidents/page.js"
 }
