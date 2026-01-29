@@ -21,40 +21,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/decisions/page.js"
     ],
-    "/positions/page": [
+    "/strategies/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/positions/page.js"
-    ],
-    "/risk/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/risk/page.js"
-    ],
-    "/context/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/context/page.js"
-    ],
-    "/health/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/health/page.js"
-    ],
-    "/logs/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/logs/page.js"
-    ],
-    "/replay/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/replay/page.js"
-    ],
-    "/settings/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/settings/page.js"
+      "static/chunks/app/strategies/page.js"
     ]
   }
 }

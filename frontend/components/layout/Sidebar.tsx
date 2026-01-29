@@ -42,7 +42,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
     return (
         <aside
-            className={`fixed left-0 top-0 z-40 h-screen transition-all duration-300 ${collapsed ? 'w-16' : 'w-56'
+            className={`fixed left-0 top-0 z-40 h-screen flex flex-col transition-all duration-300 ${collapsed ? 'w-16' : 'w-56'
                 } bg-[#0f1419] border-r border-[#2d3640]`}
         >
             {/* Logo */}
@@ -52,7 +52,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 )}
                 <button
                     onClick={onToggle}
-                    className="p-1.5 rounded-md hover:bg-[#1a1f26] text-[#8b98a5]"
+                    className="p-1.5 rounded-md hover:bg-[#1a1f26] text-[#8b98a5] transition-colors"
                 >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -61,25 +61,54 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </div>
 
             {/* Navigation */}
-            <nav className="p-2 space-y-1 overflow-y-auto h-[calc(100vh-3.5rem)]">
+            <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
                 {navigation.map((item) => {
                     const isActive = pathname === item.href;
                     return (
                         <Link
                             key={item.name}
                             href={item.href}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${isActive
-                                    ? 'bg-[#3b82f6]/10 text-[#3b82f6]'
-                                    : 'text-[#8b98a5] hover:bg-[#1a1f26] hover:text-white'
+                            className={`relative flex items-center gap-3 px-3 py-2.5 rounded-md transition-all duration-200 ${isActive
+                                ? 'bg-[#5b7a9d]/10 text-[#5b7a9d]'
+                                : 'text-[#8b98a5] hover:bg-[#1a1f26] hover:text-[#e7e9ea]'
                                 }`}
                             title={collapsed ? item.name : undefined}
                         >
-                            {iconMap[item.icon]}
+                            {isActive && (
+                                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[#5b7a9d] rounded-r-full" />
+                            )}
+                            <span className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
+                                {iconMap[item.icon]}
+                            </span>
                             {!collapsed && <span className="text-sm font-medium">{item.name}</span>}
                         </Link>
                     );
                 })}
             </nav>
+
+            {/* Footer */}
+            <div className="border-t border-[#2d3640] p-3">
+                {!collapsed ? (
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-[#6b7280]">Version</span>
+                            <span className="text-[#8b98a5] font-mono">v10.1-FINAL</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-[#6b7280]">Engine</span>
+                            <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#4a9268]" />
+                                <span className="text-[#8b98a5]">Active</span>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex justify-center">
+                        <span className="w-2 h-2 rounded-full bg-[#4a9268]" title="Engine Active" />
+                    </div>
+                )}
+            </div>
         </aside>
     );
 }
+

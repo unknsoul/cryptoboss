@@ -179,12 +179,39 @@ export default function OverviewPage() {
         return 'neutral';
     };
 
-    if (!mounted) {
+    // Skeleton loading component
+    function SkeletonCard() {
+        return (
+            <div className="card animate-pulse">
+                <div className="card-header">
+                    <div className="h-3 w-24 bg-[#2d3640] rounded" />
+                </div>
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div className="h-3 w-16 bg-[#2d3640] rounded" />
+                        <div className="h-5 w-20 bg-[#2d3640] rounded" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <div className="h-3 w-20 bg-[#2d3640] rounded" />
+                        <div className="h-5 w-12 bg-[#2d3640] rounded" />
+                    </div>
+                    <div className="h-1.5 w-full bg-[#2d3640] rounded-full" />
+                </div>
+            </div>
+        );
+    }
+
+    if (!mounted || loading) {
         return (
             <div className="space-y-6">
                 <div className="mb-8">
                     <h1 className="heading-lg mb-1">Overview</h1>
                     <p className="text-[#8b98a5] text-sm">Loading system status...</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {[...Array(6)].map((_, i) => (
+                        <SkeletonCard key={i} />
+                    ))}
                 </div>
             </div>
         );

@@ -2,11 +2,5 @@
   "/page": "app/page.js",
   "/live/page": "app/live/page.js",
   "/decisions/page": "app/decisions/page.js",
-  "/positions/page": "app/positions/page.js",
-  "/risk/page": "app/risk/page.js",
-  "/context/page": "app/context/page.js",
-  "/health/page": "app/health/page.js",
-  "/logs/page": "app/logs/page.js",
-  "/replay/page": "app/replay/page.js",
-  "/settings/page": "app/settings/page.js"
+  "/strategies/page": "app/strategies/page.js"
 }
