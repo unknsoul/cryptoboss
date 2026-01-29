@@ -505,6 +505,9 @@ video {
 .visible {
   visibility: visible;
 }
+.collapse {
+  visibility: collapse;
+}
 .fixed {
   position: fixed;
 }
@@ -765,6 +768,9 @@ video {
 }
 .flex-1 {
   flex: 1 1 0%;
+}
+.border-collapse {
+  border-collapse: collapse;
 }
 .origin-\[64px_64px\] {
   transform-origin: 64px 64px;

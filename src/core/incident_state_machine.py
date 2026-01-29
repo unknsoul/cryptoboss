@@ -1,17 +1,19 @@
 """
-Incident State Machine - v10.2-OPERATOR-GRADE
+Incident State Machine - v10.3-OPERATIONAL-GRADE
 
 Explicit failure handling with 4 states:
 - NORMAL: Full trading capability
 - DEGRADED: Reduced trading (smaller size, limited strategies)
-- INCIDENT_FREEZE: No new trades, can manage existing positions
+- INCIDENT_FREEZE: No new trades, reduce-only for existing positions
 - HALTED: Complete stop, requires manual recovery
 
-Non-Negotiable Rules:
+v10.3 Non-Negotiable Rules:
 - INCIDENT_FREEZE blocks all new trades
-- Open positions may be managed but not increased
-- Manual operator action required to exit INCIDENT_FREEZE
+- Open positions may only be REDUCED (not increased) during freeze
+- Manual operator ACKNOWLEDGMENT required to exit freeze/halt
+- Acknowledgment requires OperatorIdentity and ActionReason
 - No automated recovery from INCIDENT_FREEZE or HALTED
+- All state transitions logged via OperatorDiscipline audit
 """
 
 import logging
@@ -128,10 +130,14 @@ class IncidentStateMachine:
         self._log_dir.mkdir(parents=True, exist_ok=True)
         self._operator_control = operator_control
         
+        # v10.3: Acknowledgment tracking
+        self._pending_acknowledgment: bool = False
+        self._acknowledgment_required_since: Optional[datetime] = None
+        
         # Callbacks for state changes
         self._on_state_change_callbacks: List[callable] = []
         
-        logger.info("IncidentStateMachine initialized in NORMAL state")
+        logger.info("IncidentStateMachine initialized in NORMAL state (v10.3)")
     
     def get_state(self) -> IncidentState:
         """Get current incident state."""
@@ -236,9 +242,13 @@ class IncidentStateMachine:
         """
         Trigger INCIDENT_FREEZE state.
         
-        Blocks all new trades. Existing positions can be managed.
-        Requires operator intervention to resolve.
+        Blocks all new trades. Existing positions reduce-only.
+        Requires operator acknowledgment and intervention to resolve.
         """
+        # v10.3: Set acknowledgment requirement
+        self._pending_acknowledgment = True
+        self._acknowledgment_required_since = datetime.utcnow()
+        
         return self.transition_to(
             IncidentState.INCIDENT_FREEZE,
             reason,
@@ -250,8 +260,12 @@ class IncidentStateMachine:
         """
         Trigger HALTED state.
         
-        Complete trading stop. Requires manual recovery.
+        Complete trading stop. Requires operator acknowledgment and manual recovery.
         """
+        # v10.3: Set acknowledgment requirement
+        self._pending_acknowledgment = True
+        self._acknowledgment_required_since = datetime.utcnow()
+        
         return self.transition_to(
             IncidentState.HALTED,
             reason,
@@ -317,6 +331,108 @@ class IncidentStateMachine:
     def can_manage_existing_positions(self) -> bool:
         """Check if existing positions can be managed (close, reduce)."""
         return self._current_state != IncidentState.HALTED
+    
+    def is_reduce_only(self) -> bool:
+        """
+        v10.3: Check if reduce-only mode is active.
+        
+        In INCIDENT_FREEZE state, only position reductions are allowed.
+        Returns True if only reduce operations are permitted.
+        """
+        return self._current_state == IncidentState.INCIDENT_FREEZE
+    
+    def validate_position_change(self, current_size: float, new_size: float) -> Tuple[bool, str]:
+        """
+        v10.3: Validate if a position change is allowed in current state.
+        
+        Args:
+            current_size: Current position size (positive = long, negative = short)
+            new_size: Proposed new position size
+            
+        Returns:
+            (is_allowed, reason)
+        """
+        if self._current_state == IncidentState.HALTED:
+            return False, "HALTED: No position changes allowed"
+        
+        if self._current_state == IncidentState.INCIDENT_FREEZE:
+            # Only reductions allowed
+            if abs(new_size) > abs(current_size):
+                return False, "INCIDENT_FREEZE: Only position reductions allowed (reduce-only mode)"
+            if current_size > 0 and new_size > current_size:
+                return False, "INCIDENT_FREEZE: Cannot increase long position"
+            if current_size < 0 and new_size < current_size:
+                return False, "INCIDENT_FREEZE: Cannot increase short position"
+        
+        return True, "Position change allowed"
+    
+    def requires_acknowledgment(self) -> bool:
+        """
+        v10.3: Check if operator acknowledgment is required.
+        
+        Acknowledgment is required when system entered INCIDENT_FREEZE or HALTED
+        and operator has not yet acknowledged the incident.
+        """
+        return self._pending_acknowledgment
+    
+    def acknowledge_incident(
+        self,
+        operator_id: str,
+        reason: str,
+        resolution_notes: str = ""
+    ) -> Tuple[bool, str]:
+        """
+        v10.3: Acknowledge an incident (required before resuming normal operations).
+        
+        This does NOT automatically transition to NORMAL - it only acknowledges
+        that the operator is aware of the incident. A separate resolve_incident()
+        call is needed to return to NORMAL.
+        
+        Args:
+            operator_id: Operator acknowledging the incident
+            reason: Why the operator is acknowledging
+            resolution_notes: Optional notes about planned resolution
+            
+        Returns:
+            (success, message)
+        """
+        with self._lock:
+            if not self._pending_acknowledgment:
+                return False, "No incident pending acknowledgment"
+            
+            if not operator_id or len(operator_id) < 2:
+                return False, "Valid operator_id required for acknowledgment"
+            
+            if not reason or len(reason) < 10:
+                return False, "Acknowledgment reason must be at least 10 characters"
+            
+            # Record acknowledgment in timeline
+            event = IncidentEvent(
+                timestamp=datetime.utcnow(),
+                from_state=self._current_state,
+                to_state=self._current_state,  # State doesn't change on ack
+                reason=f"ACKNOWLEDGED by {operator_id}: {reason}",
+                triggered_by=operator_id,
+                auto_recoverable=False,
+                context={
+                    'action': 'acknowledge',
+                    'resolution_notes': resolution_notes,
+                    'time_to_acknowledge_seconds': (
+                        datetime.utcnow() - self._acknowledgment_required_since
+                    ).total_seconds() if self._acknowledgment_required_since else 0
+                }
+            )
+            self._timeline.append(event)
+            self._persist_event(event)
+            
+            self._pending_acknowledgment = False
+            
+            logger.info(
+                f"Incident acknowledged by {operator_id}: {reason}",
+                extra={'operator': operator_id, 'state': self._current_state.value}
+            )
+            
+            return True, "Incident acknowledged - call resolve_incident() to return to NORMAL"
     
     def get_size_multiplier(self) -> float:
         """

@@ -183,6 +183,59 @@ except ImportError:
     DriftDetector = None
 
 # ============================================================================
+# v10.3-OPERATIONAL-GRADE Modules
+# ============================================================================
+
+try:
+    from .operator_discipline import (
+        OperatorDiscipline,
+        OperatorIdentity,
+        ActionReason,
+        ActionReasonCode,
+        ActionType,
+        InterventionAuditLog,
+        get_operator_discipline,
+    )
+except ImportError:
+    OperatorDiscipline = None
+    OperatorIdentity = None
+    ActionReason = None
+    ActionReasonCode = None
+    ActionType = None
+    InterventionAuditLog = None
+    get_operator_discipline = None
+
+try:
+    from .drift_guard import (
+        DecisionDriftGuard,
+        ConfigChecksum,
+        DriftType,
+        DriftSeverity,
+        DriftEvent,
+        get_drift_guard,
+    )
+except ImportError:
+    DecisionDriftGuard = None
+    ConfigChecksum = None
+    DriftType = None
+    DriftSeverity = None
+    DriftEvent = None
+    get_drift_guard = None
+
+try:
+    from .config_seal import (
+        LiveConfigGuard,
+        SealedConfig,
+        SealStatus,
+        get_config_guard,
+    )
+except ImportError:
+    LiveConfigGuard = None
+    SealedConfig = None
+    SealStatus = None
+    get_config_guard = None
+
+# ============================================================================
 # Database Layer (v11.0)
 # ============================================================================
 
