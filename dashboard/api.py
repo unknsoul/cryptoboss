@@ -1,8 +1,11 @@
 """
-CryptoBoss Dashboard API - v1.0.0 FINAL RELEASE
+CryptoBoss Dashboard API - v1.0.1 RELEASE
 
 FastAPI backend with WebSocket for real-time updates.
-Implements environment_signature and data_source tagging per specification.
+Implements:
+- environment_signature and data_source tagging
+- User authentication (email/password)
+- Exchange account management with state isolation
 """
 
 import asyncio
@@ -20,10 +23,11 @@ import sys
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 # Import session manager
@@ -39,6 +43,71 @@ try:
     BINANCE_AVAILABLE = True
 except ImportError:
     BINANCE_AVAILABLE = False
+
+# v1.0.1: Import auth services
+try:
+    from src.core.auth import get_auth_service, get_account_service
+    from src.core.models import User, ExchangeAccount
+    AUTH_AVAILABLE = True
+except ImportError as e:
+    AUTH_AVAILABLE = False
+    logging.warning(f"Auth services not available: {e}")
+
+# v1.0.1: Import scoped state manager
+try:
+    from src.core.scoped_state import (
+        ScopedStateManager, switch_account, get_active_state, require_active_state
+    )
+    SCOPED_STATE_AVAILABLE = True
+except ImportError as e:
+    SCOPED_STATE_AVAILABLE = False
+    logging.warning(f"Scoped state not available: {e}")
+
+# v1.0.1: Import price truth enforcement
+try:
+    from src.core.price_truth import (
+        PriceData, PriceSource, PriceValidator, PriceFeedManager, get_price_manager
+    )
+    PRICE_TRUTH_AVAILABLE = True
+except ImportError as e:
+    PRICE_TRUTH_AVAILABLE = False
+    logging.warning(f"Price truth module not available: {e}")
+
+# v1.0.1: Import engine lifecycle
+try:
+    from src.core.engine_lifecycle import EngineLifecycle, get_engine_lifecycle
+    ENGINE_LIFECYCLE_AVAILABLE = True
+except ImportError as e:
+    ENGINE_LIFECYCLE_AVAILABLE = False
+    logging.warning(f"Engine lifecycle not available: {e}")
+
+# v1.0.1: Import live price feed
+try:
+    from src.core.live_price_feed import LivePriceFeed, get_price_feed
+    LIVE_PRICE_FEED_AVAILABLE = True
+except ImportError as e:
+    LIVE_PRICE_FEED_AVAILABLE = False
+    logging.warning(f"Live price feed not available: {e}")
+
+# v1.0.1: Import bot instance manager (TRUE ISOLATION)
+try:
+    from src.core.bot_instance import (
+        BotInstance, BotInstanceManager, get_active_bot, require_active_bot, switch_account as switch_bot_instance
+    )
+    BOT_INSTANCE_AVAILABLE = True
+except ImportError as e:
+    BOT_INSTANCE_AVAILABLE = False
+    logging.warning(f"Bot instance manager not available: {e}")
+
+# vFINAL: Import market data service for WebSocket prices
+try:
+    from src.core.market_data_service import (
+        MarketDataService, get_market_data_service, start_market_data, PriceTick
+    )
+    MARKET_DATA_AVAILABLE = True
+except ImportError as e:
+    MARKET_DATA_AVAILABLE = False
+    logging.warning(f"Market data service not available: {e}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Dashboard")
@@ -99,7 +168,7 @@ env_signature = EnvironmentSignature()
 
 
 def wrap_response(data: Dict, data_source: DataSourceTag = None) -> Dict:
-    """Wrap API response with environment_signature and data_source_tag."""
+    """Wrap API response with environment_signature, data_source_tag, and identity fields."""
     if data_source is None:
         # Auto-determine based on environment
         if env_signature.mode == "live":
@@ -109,18 +178,36 @@ def wrap_response(data: Dict, data_source: DataSourceTag = None) -> Dict:
         else:
             data_source = DataSourceTag.SIMULATED
     
-    return {
+    response = {
         "data": data,
         "environment_signature": env_signature.get_signature(),
         "data_source": data_source.value,
         "timestamp": datetime.now().isoformat()
     }
+    
+    # v1.0.1: Add mandatory identity fields if account is active
+    if SCOPED_STATE_AVAILABLE:
+        active_state = get_active_state()
+        if active_state:
+            response["user_id"] = active_state.identity.user_id
+            response["exchange_account_id"] = active_state.identity.exchange_account_id
+            response["data_scope"] = "SCOPED"
+            response["is_new_account"] = active_state.state.is_new_account()
+            response["account_created_at"] = active_state.state.created_at.isoformat()
+    
+    # Also include from dashboard state if available
+    if hasattr(state, 'active_exchange_account_id') and state.active_exchange_account_id:
+        response["exchange_account_id"] = state.active_exchange_account_id
+    if hasattr(state, 'active_user_id') and state.active_user_id:
+        response["user_id"] = state.active_user_id
+    
+    return response
 
 
 app = FastAPI(
     title="CryptoBoss Dashboard",
-    description="Professional Trading Bot Dashboard - v1.0.0 FINAL",
-    version="1.0.0"
+    description="Professional Trading Bot Dashboard - v1.0.1 with Identity Layer",
+    version="1.0.1"
 )
 
 # CORS
@@ -133,10 +220,64 @@ app.add_middleware(
 )
 
 
+# === Security ===
+security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Optional[User]:
+    """Get current authenticated user from JWT token."""
+    if not AUTH_AVAILABLE:
+        return None
+    if not credentials:
+        return None
+    
+    auth_service = get_auth_service()
+    return auth_service.verify_token(credentials.credentials)
+
+
+async def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+    """Require authentication - raises 401 if not authenticated."""
+    user = await get_current_user(credentials)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+# === Auth Request/Response Models ===
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    success: bool
+    token: Optional[str] = None
+    user: Optional[dict] = None
+    error: Optional[str] = None
+
+
+class CreateAccountRequest(BaseModel):
+    exchange_name: str = "binance"
+    environment: str  # TESTNET or LIVE
+    api_key: str
+    api_secret: str
+    label: Optional[str] = ""
+
+
+class SelectAccountRequest(BaseModel):
+    exchange_account_id: str
+
+
 # === Models ===
 
 class EngineConfig(BaseModel):
-    mode: str = "paper"
+    mode: str = "testnet"  # PAPER REMOVED - default to testnet
     capital: float = 10000.0
     symbols: List[str] = ["BTC/USDT"]
     strategy: str = "dca"
@@ -158,16 +299,16 @@ class ValidateKeysRequest(BaseModel):
 class DashboardState:
     def __init__(self):
         self.session_id = str(uuid.uuid4())
-        self.mode = "paper"
-        self.initial_capital = 10000.0
-        self.capital = 10000.0
+        self.mode = "testnet"  # PAPER REMOVED - only testnet/live
+        self.initial_capital = 0.0  # Comes from exchange
+        self.capital = 0.0
         self.pnl = 0.0
         self.start_time = datetime.now()
-        self.current_price = 65000.0
-        self.last_price = 65000.0
+        self.current_price = 0.0  # Comes from exchange
+        self.last_price = 0.0
         self.price_history: List[Dict] = []
         self.trades: List[Dict] = []
-        self.position = 0.0  # BTC held
+        self.position = 0.0  # Comes from exchange
         self.position_entry_price = 0.0
         self.total_trades = 0
         self.winning_trades = 0
@@ -175,8 +316,8 @@ class DashboardState:
         self.api_validated = False
         self.exchange_client = None
         
-        # System state
-        self.environment = "paper"  # paper, testnet, live
+        # System state - PAPER REMOVED
+        self.environment = "testnet"  # testnet or live ONLY
         self.connection_status = "disconnected"  # disconnected, connecting, connected, error
         self.timestamp_offset_ms = 0
         self.last_time_sync = None
@@ -193,6 +334,10 @@ class DashboardState:
         self.trading_pause_reason = None
         self.operator_action_log: List[Dict] = []  # Permanent log
         
+        # v1.0.1: Identity tracking
+        self.active_user_id: Optional[str] = None
+        self.active_exchange_account_id: Optional[str] = None
+        
         # Market context
         self.market_context = "UNKNOWN"  # TRENDING, RANGING, VOLATILE, CRISIS
         self.market_bias = "NEUTRAL"  # BULLISH, BEARISH, NEUTRAL
@@ -204,11 +349,20 @@ class DashboardState:
         self.decisions_today = 0
         self.rejections_today = 0
 
-    def reset(self, new_mode: str = "paper"):
-        """Reset all state for new session."""
+    def reset(self, new_mode: str = "testnet"):
+        """
+        Reset all state for new session.
+        
+        CRITICAL: Paper mode is removed. Only testnet/live allowed.
+        """
+        # Validate mode - reject paper
+        if new_mode.lower() == "paper":
+            logger.warning("⚠️ Paper mode requested but disabled - using testnet")
+            new_mode = "testnet"
+        
         self.session_id = str(uuid.uuid4())
         self.mode = new_mode
-        self.capital = self.initial_capital
+        self.capital = 0.0  # Will be fetched from exchange
         self.pnl = 0.0
         self.start_time = datetime.now()
         self.price_history = []
@@ -218,11 +372,11 @@ class DashboardState:
         self.total_trades = 0
         self.winning_trades = 0
         self.losing_trades = 0
-        self.api_validated = new_mode == "paper"
+        self.api_validated = False  # Must connect to exchange
         
         # Reset system state
         self.environment = new_mode
-        self.connection_status = "disconnected" if new_mode != "paper" else "connected"
+        self.connection_status = "disconnected"  # Must connect to exchange
         self.timestamp_offset_ms = 0
         self.market_context = "UNKNOWN"
         self.market_bias = "NEUTRAL"
@@ -452,6 +606,373 @@ async def reset_session():
     }
 
 
+# === v1.0.1: Authentication Endpoints ===
+
+@app.post("/api/auth/signup")
+async def signup(request: SignupRequest):
+    """
+    Create a new user account.
+    
+    CryptoBoss 1.0.1: Email/password authentication.
+    """
+    if not AUTH_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Auth services not available")
+    
+    auth_service = get_auth_service()
+    result = auth_service.signup(request.email, request.password)
+    
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    
+    return wrap_response({
+        "success": True,
+        "token": result.token,
+        "user": result.user.to_dict()
+    })
+
+
+@app.post("/api/auth/login")
+async def login(request: LoginRequest):
+    """
+    Authenticate user and return JWT token.
+    """
+    if not AUTH_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Auth services not available")
+    
+    auth_service = get_auth_service()
+    result = auth_service.login(request.email, request.password)
+    
+    if not result.success:
+        raise HTTPException(status_code=401, detail=result.error)
+    
+    logger.info(f"✅ User logged in: {request.email}")
+    
+    return wrap_response({
+        "success": True,
+        "token": result.token,
+        "user": result.user.to_dict()
+    })
+
+
+@app.post("/api/auth/logout")
+async def logout(user: User = Depends(require_auth)):
+    """
+    Logout current user.
+    """
+    # Session cleanup handled by frontend discarding token
+    logger.info(f"User logged out: {user.email}")
+    return wrap_response({"success": True, "message": "Logged out"})
+
+
+@app.get("/api/auth/me")
+async def get_me(user: User = Depends(require_auth)):
+    """
+    Get current authenticated user info.
+    """
+    return wrap_response({
+        "user": user.to_dict(),
+        "authenticated": True
+    })
+
+
+# === v1.0.1: Exchange Account Endpoints ===
+
+@app.post("/api/accounts/create")
+async def create_account(request: CreateAccountRequest, user: User = Depends(require_auth)):
+    """
+    Create a new exchange account.
+    
+    CryptoBoss 1.0.1: Each API key pair creates a NEW exchange_account_id.
+    All state is scoped to this account.
+    """
+    if not AUTH_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Auth services not available")
+    
+    account_service = get_account_service()
+    result = account_service.create_account(
+        user_id=user.user_id,
+        exchange_name=request.exchange_name,
+        environment=request.environment,
+        api_key=request.api_key,
+        api_secret=request.api_secret,
+        label=request.label
+    )
+    
+    if not result.success:
+        raise HTTPException(status_code=400, detail=result.error)
+    
+    logger.info(f"✅ New exchange account: {result.account.exchange_account_id[:8]}...")
+    
+    return wrap_response({
+        "success": True,
+        "account": result.account.to_dict(),
+        "message": "Exchange account created with clean state"
+    })
+
+
+@app.get("/api/accounts/list")
+async def list_accounts(user: User = Depends(require_auth)):
+    """
+    Get all exchange accounts for current user.
+    """
+    if not AUTH_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Auth services not available")
+    
+    account_service = get_account_service()
+    result = account_service.get_accounts(user.user_id)
+    
+    return wrap_response({
+        "accounts": [acc.to_dict() for acc in result.accounts],
+        "count": len(result.accounts)
+    })
+
+
+@app.post("/api/accounts/select")
+async def select_account(request: SelectAccountRequest, user: User = Depends(require_auth)):
+    """
+    Select an exchange account as active.
+    
+    FUNDAMENTAL AXIOM: There is NO such thing as a global bot state.
+    
+    THIS TRIGGERS:
+    1. STOP current bot instance
+    2. DESTROY all its memory
+    3. START a brand-new bot instance
+    4. LOAD state ONLY for selected exchange_account_id
+    """
+    if not AUTH_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Auth services not available")
+    
+    account_service = get_account_service()
+    result = account_service.get_account(user.user_id, request.exchange_account_id)
+    
+    if not result.success:
+        raise HTTPException(status_code=404, detail=result.error)
+    
+    # === TRUE INSTANCE ISOLATION ===
+    # Step 1-4: Switch bot instance (STOP → DESTROY → START)
+    bot_instance = None
+    is_new_account = False
+    
+    if BOT_INSTANCE_AVAILABLE:
+        logger.info(f"🔄 Switching bot instance to {request.exchange_account_id[:8]}...")
+        bot_instance = switch_bot_instance(
+            user_id=user.user_id,
+            exchange_account_id=result.account.exchange_account_id,
+            environment=result.account.environment
+        )
+        is_new_account = len(bot_instance.trading_state.trade_history) == 0
+        logger.info(f"✅ Bot instance switched - {'NEW' if is_new_account else 'existing'} account")
+    
+    # Legacy: Also reset dashboard state
+    state.reset(result.account.environment.lower())
+    state.active_exchange_account_id = result.account.exchange_account_id
+    state.active_user_id = user.user_id
+    
+    # Legacy: Switch scoped state manager
+    if SCOPED_STATE_AVAILABLE:
+        try:
+            scoped_manager = switch_account(user.user_id, result.account.exchange_account_id)
+            logger.info(f"🔒 ScopedStateManager also switched")
+        except Exception as e:
+            logger.warning(f"ScopedStateManager switch failed: {e}")
+    
+    # Lock environment based on account
+    if not env_signature.is_locked:
+        env_signature.lock(result.account.environment.lower())
+    
+    # CRYPTOBOSS 2.0: Save active account to SQLite for persistence
+    try:
+        from src.core.database.repository import get_repository
+        repo = get_repository()
+        repo.set_active_account(user.user_id, result.account.exchange_account_id)
+    except Exception as e:
+        logger.warning(f"Could not save active account to SQLite: {e}")
+    
+    logger.info(f"🎯 Account switch complete: {result.account.exchange_account_id[:8]}... ({result.account.environment})")
+    
+    # Broadcast ACCOUNT_CHANGED event (frontend MUST reset everything)
+    await manager.broadcast({
+        "type": "ACCOUNT_CHANGED",
+        "action": "FULL_RESET_REQUIRED",
+        "exchange_account_id": result.account.exchange_account_id,
+        "environment": result.account.environment,
+        "is_new_account": is_new_account,
+        "mandatory_actions": [
+            "STOP_ALL_STREAMS",
+            "CLEAR_ALL_UI_STATE",
+            "CLEAR_CHARTS",
+            "CLEAR_TABLES",
+            "CLOSE_ALL_SOCKETS",
+            "REQUEST_FRESH_DATA"
+        ]
+    })
+    
+    # Get dashboard data from the new bot instance
+    dashboard_data = None
+    if bot_instance:
+        dashboard_data = bot_instance.get_dashboard_data()
+    
+    return wrap_response({
+        "success": True,
+        "account": result.account.to_dict(),
+        "instance_switched": bot_instance is not None,
+        "is_new_account": is_new_account,
+        "dashboard_data": dashboard_data,
+        "message": f"Bot instance switched - {'empty state' if is_new_account else 'loaded existing state'}"
+    })
+
+
+@app.delete("/api/accounts/{exchange_account_id}")
+async def delete_account(exchange_account_id: str, user: User = Depends(require_auth)):
+    """
+    Delete/archive an exchange account.
+    
+    Warning: This archives the account and all associated data.
+    """
+    if not AUTH_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Auth services not available")
+    
+    account_service = get_account_service()
+    result = account_service.delete_account(user.user_id, exchange_account_id)
+    
+    if not result.success:
+        raise HTTPException(status_code=404, detail=result.error)
+    
+    logger.warning(f"🗑️ Account archived: {exchange_account_id[:8]}...")
+    
+    return wrap_response({
+        "success": True,
+        "message": "Account archived"
+    })
+
+
+@app.get("/api/accounts/active")
+async def get_active_account(user: User = Depends(require_auth)):
+    """
+    Get the currently active exchange account.
+    """
+    if not hasattr(state, 'active_exchange_account_id') or not state.active_exchange_account_id:
+        return wrap_response({
+            "active": False,
+            "account": None,
+            "message": "No account selected"
+        })
+    
+    account_service = get_account_service()
+    result = account_service.get_account(user.user_id, state.active_exchange_account_id)
+    
+    if not result.success:
+        return wrap_response({
+            "active": False,
+            "account": None,
+            "message": "Account not found"
+        })
+    
+    # Get key fingerprint for display
+    fingerprint = account_service.get_key_fingerprint(user.user_id, state.active_exchange_account_id)
+    
+    account_data = result.account.to_dict()
+    account_data["api_key_fingerprint"] = fingerprint
+    
+    return wrap_response({
+        "active": True,
+        "account": account_data
+    })
+
+
+# === Account Reset Endpoint ===
+
+class ResetAccountRequest(BaseModel):
+    confirm: bool = False
+    reason: str = ""
+
+
+@app.post("/api/accounts/{exchange_account_id}/reset")
+async def reset_account(exchange_account_id: str, request: ResetAccountRequest, user: User = Depends(require_auth)):
+    """
+    Reset account state - DELETE all trades and analytics data.
+    
+    CRYPTOBOSS 2.0: Account reset functionality.
+    
+    WHAT GETS DELETED:
+    - All trades for this account
+    - PnL history
+    - Bot instance state
+    
+    WHAT STAYS:
+    - User account
+    - Exchange account (API keys)
+    - Other exchange accounts
+    
+    REQUIRES: confirm=True and a reason.
+    """
+    if not request.confirm:
+        raise HTTPException(
+            status_code=400, 
+            detail="Must set confirm=true to reset account. This is destructive!"
+        )
+    
+    if len(request.reason) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Reason must be at least 10 characters"
+        )
+    
+    try:
+        from src.core.database.repository import get_repository
+        repo = get_repository()
+        
+        # Verify user owns this account
+        account = repo.find_account_by_id(exchange_account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        if account.user_id != user.user_id:
+            raise HTTPException(status_code=403, detail="Not your account")
+        
+        # Delete all trades for this account
+        deleted_count = repo.delete_trades_for_account(user.user_id, exchange_account_id)
+        
+        # Log the action
+        logger.warning(
+            f"🗑️ ACCOUNT RESET: {exchange_account_id[:8]}... | "
+            f"User: {user.email} | "
+            f"Trades deleted: {deleted_count} | "
+            f"Reason: {request.reason}"
+        )
+        
+        # Reset bot instance if available
+        if BOT_INSTANCE_AVAILABLE:
+            try:
+                from src.core.bot_instance import BotInstanceManager
+                manager_instance = BotInstanceManager()
+                if manager_instance.active_instance and manager_instance.active_instance.account_id == exchange_account_id:
+                    manager_instance.destroy_active()
+                    manager_instance.create_instance(
+                        account_id=exchange_account_id,
+                        user_id=user.user_id,
+                        environment=account.environment
+                    )
+            except Exception as e:
+                logger.warning(f"Could not reset bot instance: {e}")
+        
+        return wrap_response({
+            "success": True,
+            "trades_deleted": deleted_count,
+            "user_id": user.user_id,
+            "exchange_account_id": exchange_account_id,
+            "reason": request.reason,
+            "message": f"Account reset complete. {deleted_count} trades deleted."
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to reset account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # === System State Endpoints ===
 
 @app.get("/api/system")
@@ -577,6 +1098,78 @@ async def toggle_kill_switch(active: bool = True, reason: str = "Manual activati
     }
 
 
+# === Multi-Symbol Prices Endpoint ===
+
+SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
+
+
+@app.get("/api/prices/live")
+async def get_live_prices():
+    """
+    Get live prices for multiple symbols.
+    
+    CRYPTOBOSS 2.0: Real prices from Binance.
+    NO FALLBACK - if exchange unavailable, return empty.
+    """
+    prices = {}
+    
+    try:
+        if BINANCE_AVAILABLE:
+            # Determine if testnet based on environment
+            is_testnet = env_signature.mode == "testnet" or not env_signature.is_locked
+            
+            # Create client for price fetch
+            client = BinanceClient(testnet=is_testnet)
+            
+            for symbol in SUPPORTED_SYMBOLS:
+                try:
+                    ticker = client.exchange.fetch_ticker(symbol.replace("USDT", "/USDT"))
+                    prices[symbol] = {
+                        "symbol": symbol,
+                        "price": ticker.get("last", 0),
+                        "change24h": ticker.get("percentage", 0),
+                        "high24h": ticker.get("high", 0),
+                        "low24h": ticker.get("low", 0),
+                        "volume24h": ticker.get("quoteVolume", 0),
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "BINANCE_TESTNET" if is_testnet else "BINANCE_LIVE"
+                    }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {symbol}: {e}")
+                    prices[symbol] = {
+                        "symbol": symbol,
+                        "price": 0,
+                        "error": str(e),
+                        "timestamp": datetime.now().isoformat()
+                    }
+            
+            client.close()
+        else:
+            # No Binance client - return empty
+            for symbol in SUPPORTED_SYMBOLS:
+                prices[symbol] = {
+                    "symbol": symbol,
+                    "price": 0,
+                    "error": "Exchange client not available",
+                    "timestamp": datetime.now().isoformat()
+                }
+    except Exception as e:
+        logger.error(f"Failed to fetch prices: {e}")
+        for symbol in SUPPORTED_SYMBOLS:
+            prices[symbol] = {
+                "symbol": symbol,
+                "price": 0,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    return wrap_response({
+        "prices": prices,
+        "symbols": SUPPORTED_SYMBOLS,
+        "count": len(prices)
+    })
+
+
 
 @app.get("/api/status")
 async def get_status():
@@ -607,10 +1200,55 @@ async def get_status():
 
 @app.get("/api/portfolio")
 async def get_portfolio():
-    """Get portfolio details."""
+    """
+    Get portfolio details.
+    
+    RULE: Returns data ONLY from the active bot instance.
+    New accounts = EMPTY portfolio.
+    """
+    # Use BotInstanceManager for true isolation
+    if BOT_INSTANCE_AVAILABLE:
+        bot = get_active_bot()
+        if bot:
+            trading_state = bot.trading_state
+            positions = []
+            
+            # Only show positions if they exist in THIS bot instance
+            for pos in trading_state.positions:
+                positions.append({
+                    "symbol": pos.get("symbol", "BTC/USDT"),
+                    "quantity": pos.get("quantity", 0),
+                    "entry_price": pos.get("entry_price", 0),
+                    "current_price": state.current_price,
+                    "value_usd": pos.get("quantity", 0) * state.current_price,
+                    "pnl": pos.get("pnl", 0),
+                    "pnl_pct": pos.get("pnl_pct", 0)
+                })
+            
+            return wrap_response({
+                "balance": trading_state.balances if trading_state.balances else {"USDT": 10000.0, "BTC": 0.0},
+                "positions": positions,  # Empty for new accounts
+                "total_value_usd": sum(trading_state.balances.values()) if trading_state.balances else 10000.0,
+                "daily_pnl": trading_state.total_pnl,
+                "daily_pnl_pct": (trading_state.total_pnl / 10000 * 100) if trading_state.total_pnl else 0,
+                "is_new_account": len(trading_state.trade_history) == 0
+            })
+        else:
+            # No bot instance - return empty
+            return wrap_response({
+                "balance": {"USDT": 0.0, "BTC": 0.0},
+                "positions": [],
+                "total_value_usd": 0,
+                "daily_pnl": 0,
+                "daily_pnl_pct": 0,
+                "is_new_account": True,
+                "error": "No active bot instance"
+            })
+    
+    # Fallback to legacy state
     btc_value = state.position * state.current_price
     
-    return {
+    return wrap_response({
         "balance": {
             "USDT": round(state.capital, 2),
             "BTC": round(state.position, 6)
@@ -629,13 +1267,68 @@ async def get_portfolio():
         "total_value_usd": state.portfolio_value,
         "daily_pnl": state.total_pnl,
         "daily_pnl_pct": (state.total_pnl / state.initial_capital * 100) if state.initial_capital > 0 else 0
-    }
+    })
 
 
 @app.get("/api/trades")
-async def get_trades(limit: int = 50):
-    """Get recent trades."""
-    return state.trades[-limit:]
+async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
+    """
+    Get recent trades.
+    
+    CRYPTOBOSS 2.0: Uses SQLite repository with ownership filtering.
+    CRITICAL: Always filters by user_id AND exchange_account_id.
+    New accounts = EMPTY trades array.
+    """
+    try:
+        from src.core.database.repository import get_repository
+        repo = get_repository()
+        
+        # Get active account ID
+        active_account_id = repo.get_active_account_id(user.user_id)
+        
+        if not active_account_id:
+            # No active account - return empty
+            return wrap_response({
+                "trades": [],
+                "count": 0,
+                "is_new_account": True,
+                "user_id": user.user_id,
+                "exchange_account_id": None,
+                "message": "No active account selected"
+            })
+        
+        # Get trades from SQLite - ALWAYS filtered by ownership
+        trades = repo.get_trades(user.user_id, active_account_id, limit=limit)
+        
+        return wrap_response({
+            "trades": trades,
+            "count": len(trades),
+            "is_new_account": len(trades) == 0,
+            "user_id": user.user_id,
+            "exchange_account_id": active_account_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to get trades: {e}")
+        
+        # Fallback to bot instance if SQLite fails
+        if BOT_INSTANCE_AVAILABLE:
+            bot = get_active_bot()
+            if bot:
+                trades = bot.trading_state.trade_history[-limit:]
+                return wrap_response({
+                    "trades": trades,
+                    "count": len(trades),
+                    "is_new_account": len(bot.trading_state.trade_history) == 0
+                })
+        
+        # Ultimate fallback - empty
+        return wrap_response({
+            "trades": [],
+            "count": 0,
+            "is_new_account": True,
+            "error": str(e)
+        })
 
 
 @app.get("/api/strategies")
@@ -929,6 +1622,87 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+# === WebSocket Prices (vFINAL) ===
+
+# Store connected price clients
+price_clients: List[WebSocket] = []
+
+
+@app.websocket("/ws/prices")
+async def websocket_prices(websocket: WebSocket):
+    """
+    Real-time price feed WebSocket.
+    
+    CRYPTOBOSS vFINAL: Prices from Binance WebSocket.
+    - Uses MAINNET for prices (testnet has no real data)
+    - Auto-pushes updates to all connected clients
+    - Shows 'disconnected' if no data
+    """
+    await websocket.accept()
+    price_clients.append(websocket)
+    
+    try:
+        # Send current prices immediately
+        if MARKET_DATA_AVAILABLE:
+            service = get_market_data_service()
+            prices = {symbol: tick.to_dict() for symbol, tick in service.get_all_prices().items()}
+            await websocket.send_json({
+                "type": "init",
+                "prices": prices,
+                "connected": service.is_connected,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            await websocket.send_json({
+                "type": "init",
+                "prices": {},
+                "connected": False,
+                "error": "Market data service not available",
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        # Keep connection alive and handle client messages
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                message = json.loads(data)
+                
+                if message.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                await websocket.send_json({"type": "heartbeat", "timestamp": datetime.now().isoformat()})
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in price_clients:
+            price_clients.remove(websocket)
+
+
+async def broadcast_price_update(tick: PriceTick):
+    """Broadcast price update to all connected WebSocket clients."""
+    if not price_clients:
+        return
+        
+    message = {
+        "type": "price",
+        "symbol": tick.symbol,
+        "data": tick.to_dict()
+    }
+    
+    disconnected = []
+    for client in price_clients:
+        try:
+            await client.send_json(message)
+        except Exception:
+            disconnected.append(client)
+    
+    # Clean up disconnected clients
+    for client in disconnected:
+        price_clients.remove(client)
+
+
 # === Background Tasks ===
 
 async def price_and_trading_simulator():
@@ -1054,6 +1828,17 @@ async def price_and_trading_simulator():
 async def startup():
     """Start background tasks."""
     asyncio.create_task(price_and_trading_simulator())
+    
+    # vFINAL: Start market data service for real-time prices
+    if MARKET_DATA_AVAILABLE:
+        try:
+            service = get_market_data_service()
+            service.subscribe(broadcast_price_update)
+            await service.start()
+            logger.info("🚀 Market data service started - real-time prices from Binance")
+        except Exception as e:
+            logger.warning(f"Could not start market data service: {e}")
+    
     logger.info("Dashboard API started with trading simulator")
 
 

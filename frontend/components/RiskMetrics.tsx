@@ -18,20 +18,29 @@ export default function RiskMetrics() {
     useEffect(() => {
         const fetchMetrics = async () => {
             try {
-                const response = await fetch('/api/risk-metrics');
-                const data = await response.json();
-                setMetrics(data);
+                const response = await fetch('/api/risk');
+                const result = await response.json();
+                // Handle wrapped response format
+                const data = result.data || result;
+                setMetrics({
+                    sharpe_ratio: data.sharpe_ratio || 0,
+                    max_drawdown: data.max_drawdown || 0,
+                    win_rate: data.win_rate || 0,
+                    profit_factor: data.profit_factor || 0,
+                    total_trades: data.total_trades || 0,
+                    daily_pnl: data.daily_pnl || 0,
+                });
                 setLoading(false);
             } catch (error) {
                 console.error('Failed to fetch risk metrics:', error);
-                // Mock data for demo
+                // NO MOCK DATA - show zeroes for new accounts
                 setMetrics({
-                    sharpe_ratio: 1.85,
-                    max_drawdown: -8.5,
-                    win_rate: 62.5,
-                    profit_factor: 1.78,
-                    total_trades: 245,
-                    daily_pnl: 125.50,
+                    sharpe_ratio: 0,
+                    max_drawdown: 0,
+                    win_rate: 0,
+                    profit_factor: 0,
+                    total_trades: 0,
+                    daily_pnl: 0,
                 });
                 setLoading(false);
             }

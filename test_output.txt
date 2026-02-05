@@ -1,0 +1,44 @@
+============================= test session starts =============================
+platform win32 -- Python 3.10.11, pytest-7.4.0, pluggy-1.6.0 -- C:\Users\hardi\AppData\Local\Programs\Python\Python310\python.exe
+cachedir: .pytest_cache
+rootdir: D:\projects\final99
+configfile: pytest.ini
+plugins: anyio-3.7.1, langsmith-0.4.8, asyncio-0.21.1
+asyncio: mode=strict
+collecting ... collected 9 items
+
+tests/test_production.py::TestBacktestEngine::test_engine_initialization PASSED [ 11%]
+tests/test_production.py::TestBacktestEngine::test_slippage_calculation PASSED [ 22%]
+tests/test_production.py::TestFeatureEngine::test_feature_generation PASSED [ 33%]
+tests/test_production.py::TestFeatureEngine::test_feature_consistency PASSED [ 44%]
+tests/test_production.py::TestRiskEngine::test_volatility_sizing PASSED  [ 55%]
+tests/test_production.py::TestRiskEngine::test_kill_switch PASSED        [ 66%]
+tests/test_production.py::TestExchange::test_mock_exchange PASSED        [ 77%]
+tests/test_production.py::TestExchange::test_exchange_factory PASSED     [ 88%]
+tests/test_production.py::TestMLPipeline::test_label_creation FAILED     [100%]
+
+================================== FAILURES ===================================
+_____________________ TestMLPipeline.test_label_creation ______________________
+
+self = <test_production.TestMLPipeline object at 0x00000172A706A770>
+
+    def test_label_creation(self):
+        ml = MLPipeline()
+    
+        # Create sample data
+        dates = pd.date_range('2024-01-01', periods=200, freq='1h')
+        df = pd.DataFrame({
+            'close': np.random.uniform(39500, 40500, 200)
+        }, index=dates)
+    
+        labels = ml.create_labels(df, horizon=4, threshold_pct=0.5)
+    
+        assert len(labels) == len(df)
+>       assert labels.dtype == int
+E       AssertionError: assert dtype('float64') == int
+E        +  where dtype('float64') = 2024-01-01 00:00:00    0.0\n2024-01-01 01:00:00    1.0\n2024-01-01 02:00:00    0.0\n2024-01-01 03:00:00    0.0\n2024-01-01 04:00:00    1.0\n                      ... \n2024-01-09 03:00:00    1.0\n2024-01-09 04:00:00    NaN\n2024-01-09 05:00:00    NaN\n2024-01-09 06:00:00    NaN\n2024-01-09 07:00:00    NaN\nFreq: H, Name: close, Length: 200, dtype: float64.dtype
+
+tests\test_production.py:145: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_production.py::TestMLPipeline::test_label_creation - Assert...
+========================= 1 failed, 8 passed in 2.41s =========================

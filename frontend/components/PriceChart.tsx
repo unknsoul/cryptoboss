@@ -33,21 +33,17 @@ export default function PriceChart() {
         const fetchPriceData = async () => {
             try {
                 const response = await fetch(`/api/prices?timeframe=${timeframe}`);
-                const data = await response.json();
-                setPriceData(data);
+                const result = await response.json();
+                // Handle wrapped response format
+                const data = result.data || result;
+                if (Array.isArray(data)) {
+                    setPriceData(data);
+                }
                 setLoading(false);
             } catch (error) {
                 console.error('Failed to fetch price data:', error);
-                // Use mock data for demo
-                const mockData: PriceData[] = Array.from({ length: 100 }, (_, i) => ({
-                    timestamp: new Date(Date.now() - (99 - i) * 3600000).toISOString(),
-                    open: 40000 + Math.random() * 5000,
-                    high: 40500 + Math.random() * 5000,
-                    low: 39500 + Math.random() * 5000,
-                    close: 40000 + Math.random() * 5000,
-                    volume: 1000 + Math.random() * 500,
-                }));
-                setPriceData(mockData);
+                // NO MOCK DATA - show waiting state
+                setPriceData([]);
                 setLoading(false);
             }
         };
@@ -85,8 +81,8 @@ export default function PriceChart() {
                             key={tf}
                             onClick={() => setTimeframe(tf)}
                             className={`px-3 py-1 rounded text-sm ${timeframe === tf
-                                    ? 'bg-accent-blue text-white'
-                                    : 'bg-bg-tertiary text-text-secondary hover:text-text-primary'
+                                ? 'bg-accent-blue text-white'
+                                : 'bg-bg-tertiary text-text-secondary hover:text-text-primary'
                                 }`}
                         >
                             {tf}

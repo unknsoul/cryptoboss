@@ -1,0 +1,143 @@
+﻿python : 2026-02-05 
+21:02:45,525 | INFO 
+| src.core.config_man
+ager - ConfigManager 
+initialized for 
+environment: dev
+At line:1 char:32
++ $env:PYTHONIOENCODI
+NG='utf-8'; python 
+run_trading_bot.py 
+2>&1 | Out-F ...
++                    
+            ~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (2026-02   
+ -05 21:0...nviro    
+nment: dev:Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+2026-02-05 
+21:02:45,538 | ERROR 
+| src.exchange.binanc
+e_client - 
+Configuration error: 
+Missing Binance API 
+key. Set 
+BINANCE_API_KEY 
+environment variable 
+or pass api_key 
+parameter.
+2026-02-05 
+21:02:45,538 | INFO 
+| src.core.environmen
+t_guard - 
+EnvironmentGuard 
+Initialized: 
+MODE=PAPER | binance
+2026-02-05 
+21:02:45,540 | INFO 
+| src.core.incident_s
+tate_machine - 
+IncidentStateMachine 
+initialized in 
+NORMAL state (v10.3)
+2026-02-05 
+21:02:45,540 | INFO 
+| src.core.state_mana
+ger - StateManager 
+initialized with 
+crash-proof 
+persistence
+2026-02-05 
+21:02:45,541 | INFO 
+| src.core.event_bus 
+- EventBus 
+initialized
+2026-02-05 
+21:02:45,541 | INFO 
+| src.core.risk_guard
+ian - RiskGuardian 
+initialized with 
+portfolio value 
+$10,000.00
+2026-02-05 
+21:02:45,542 | ERROR 
+| CryptoBoss - Fatal 
+error: 
+exchange_client is 
+REQUIRED. No local 
+simulation allowed - 
+all trading goes 
+through exchange.
+Traceback (most 
+recent call last):
+  File "D:\projects\f
+inal99\run_trading_bo
+t.py", line 306, in 
+<module>
+    
+asyncio.run(main())
+  File "C:\Users\hard
+i\AppData\Local\Progr
+ams\Python\Python310\
+lib\asyncio\runners.p
+y", line 44, in run
+    return loop.run_u
+ntil_complete(main)
+  File "C:\Users\hard
+i\AppData\Local\Progr
+ams\Python\Python310\
+lib\asyncio\base_even
+ts.py", line 649, in 
+run_until_complete
+    return 
+future.result()
+  File "D:\projects\f
+inal99\run_trading_bo
+t.py", line 220, in 
+main
+    engine = 
+create_engine(
+  File "D:\projects\f
+inal99\src\core\engin
+e.py", line 424, in 
+create_engine
+    return 
+TradingEngine(
+  File "D:\projects\f
+inal99\src\core\engin
+e.py", line 126, in 
+__init__
+    self.execution_ro
+uter = 
+ExecutionRouter(
+  File "D:\projects\f
+inal99\src\core\execu
+tion_router.py", 
+line 262, in __init__
+    raise ValueError(
+ValueError: 
+exchange_client is 
+REQUIRED. No local 
+simulation allowed - 
+all trading goes 
+through exchange.
+============================================================
+  ≡ƒñû CRYPTOBOSS TRADING BOT
+============================================================
+  Mode: PAPER
+  Environment: dev
+  Capital: $10,000.00
+  Symbols: BTC/USDT
+  Strategy: dca
+============================================================
+
+  ≡ƒôí Testing Exchange Connection...
+  ΓÜá∩╕Å  Exchange connection failed: Missing Binance API key. Set BINANCE_API_KEY environment variable or pass api_key parameter.

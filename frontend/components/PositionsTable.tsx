@@ -21,26 +21,20 @@ export default function PositionsTable() {
     useEffect(() => {
         const fetchPositions = async () => {
             try {
-                const response = await fetch('/api/positions');
-                const data = await response.json();
-                setPositions(data);
+                // Use correct endpoint: /api/portfolio returns positions
+                const response = await fetch('/api/portfolio');
+                const result = await response.json();
+
+                // Handle wrapped response format
+                const data = result.data || result;
+
+                // Set positions from the response - empty array for new accounts
+                setPositions(data.positions || []);
                 setLoading(false);
             } catch (error) {
                 console.error('Failed to fetch positions:', error);
-                // Mock data for demo
-                setPositions([
-                    {
-                        id: '1',
-                        symbol: 'BTCUSDT',
-                        side: 'LONG',
-                        entry_price: 41250.50,
-                        current_price: 41450.25,
-                        size: 0.5,
-                        pnl: 99.88,
-                        pnl_pct: 0.48,
-                        unrealized_pnl: 99.88,
-                    },
-                ]);
+                // NO MOCK DATA - show empty on error
+                setPositions([]);
                 setLoading(false);
             }
         };
@@ -105,8 +99,8 @@ export default function PositionsTable() {
                                 <td>
                                     <span
                                         className={`px-2 py-1 rounded text-xs font-medium ${position.side === 'LONG'
-                                                ? 'bg-accent-green/20 text-accent-green'
-                                                : 'bg-accent-red/20 text-accent-red'
+                                            ? 'bg-accent-green/20 text-accent-green'
+                                            : 'bg-accent-red/20 text-accent-red'
                                             }`}
                                     >
                                         {position.side}

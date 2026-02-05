@@ -20,29 +20,15 @@ export default function StrategyControls() {
         const fetchStrategies = async () => {
             try {
                 const response = await fetch('/api/strategies');
-                const data = await response.json();
+                const result = await response.json();
+                // Handle wrapped response format
+                const data = result.data?.strategies || result.strategies || [];
                 setStrategies(data);
                 setLoading(false);
             } catch (error) {
                 console.error('Failed to fetch strategies:', error);
-                // Mock data for demo
-                setStrategies([
-                    {
-                        name: 'Momentum Strategy',
-                        enabled: true,
-                        performance: { win_rate: 65.0, pnl: 450.25, trades: 82 },
-                    },
-                    {
-                        name: 'Mean Reversion',
-                        enabled: true,
-                        performance: { win_rate: 58.5, pnl: 320.50, trades: 105 },
-                    },
-                    {
-                        name: 'Breakout Strategy',
-                        enabled: false,
-                        performance: { win_rate: 52.0, pnl: -85.75, trades: 45 },
-                    },
-                ]);
+                // NO MOCK DATA - show empty for new accounts
+                setStrategies([]);
                 setLoading(false);
             }
         };
@@ -63,7 +49,7 @@ export default function StrategyControls() {
 
             setStrategies((prev) =>
                 prev.map((s) =>
-                    s.name === strategy Name ? { ...s, enabled: !s.enabled } : s
+                    s.name === strategyName ? { ...s, enabled: !s.enabled } : s
                 )
             );
         } catch (error) {
@@ -98,8 +84,8 @@ export default function StrategyControls() {
                             <button
                                 onClick={() => toggleStrategy(strategy.name)}
                                 className={`px-3 py-1 rounded text-sm font-medium transition-colors ${strategy.enabled
-                                        ? 'bg-accent-green text-white hover:bg-accent-green/80'
-                                        : 'bg-bg-tertiary text-text-secondary hover:bg-bg-tertiary/80'
+                                    ? 'bg-accent-green text-white hover:bg-accent-green/80'
+                                    : 'bg-bg-tertiary text-text-secondary hover:bg-bg-tertiary/80'
                                     }`}
                             >
                                 {strategy.enabled ? 'Enabled' : 'Disabled'}

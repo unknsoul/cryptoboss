@@ -334,6 +334,40 @@ from .exchange_health_monitor import (
 )
 
 # ============================================================================
+# Engine & Configuration
+# ============================================================================
+
+from .engine import (
+    create_engine,
+    TradingEngine,
+)
+
+from .config_manager import (
+    get_config,
+    ConfigManager,
+)
+
+from .secrets_manager import (
+    get_secrets,
+    SecretsManager,
+)
+
+from .observability import (
+    get_observability,
+    ObservabilityManager,
+)
+
+from .graceful_shutdown import (
+    get_shutdown_manager,
+    GracefulShutdown,
+)
+
+from .integration_hub import (
+    get_integration_hub,
+    IntegrationHub,
+)
+
+# ============================================================================
 # Exports
 # ============================================================================
 
@@ -423,4 +457,18 @@ __all__ = [
     # Exchange
     'ExchangeStateManager',
     'ExchangeHealthMonitor',
+    
+    # Engine & Configuration
+    'create_engine',
+    'TradingEngine',
+    'get_config',
+    'ConfigManager',
+    'get_secrets',
+    'SecretsManager',
+    'get_observability',
+    'ObservabilityManager',
+    'get_shutdown_manager',
+    'GracefulShutdown',
+    'get_integration_hub',
+    'IntegrationHub',
 ]

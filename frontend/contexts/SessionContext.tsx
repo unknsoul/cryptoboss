@@ -3,18 +3,21 @@
 /**
  * Session Context - Central session lifecycle management for frontend
  * 
+ * CRYPTOBOSS 2.0: PAPER TRADING REMOVED
+ * Only TESTNET and LIVE environments are supported.
+ * 
  * Provides:
  * - Current session ID
- * - Trading mode (paper/testnet/live)
+ * - Trading environment (testnet/live)
  * - Connection status
- * - Mode switching with confirmation
+ * - Environment switching with confirmation
  * - Session reset functionality
  */
 
 import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
 
-// Types
-export type TradingMode = 'paper' | 'testnet' | 'live';
+// Types - PAPER REMOVED
+export type TradingMode = 'testnet' | 'live';
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export interface ApiConfig {
@@ -33,6 +36,7 @@ export interface SessionState {
     lastError: string | null;
     balances: Record<string, number>;
     createdAt: string | null;
+    activeAccount: { exchange_account_id: string; label: string; environment: string } | null;
 }
 
 type SessionAction =
@@ -41,19 +45,21 @@ type SessionAction =
     | { type: 'SET_CONNECTION_STATUS'; payload: ConnectionStatus }
     | { type: 'SET_API_CONFIG'; payload: ApiConfig | null }
     | { type: 'SET_BALANCES'; payload: Record<string, number> }
+    | { type: 'SET_ACTIVE_ACCOUNT'; payload: { exchange_account_id: string; label: string; environment: string } | null }
     | { type: 'SET_ERROR'; payload: string | null }
     | { type: 'RESET_SESSION' }
     | { type: 'CLEAR_ALL' };
 
 const initialState: SessionState = {
     sessionId: null,
-    mode: 'paper',
+    mode: 'testnet',  // PAPER REMOVED - default to testnet
     connectionStatus: 'disconnected',
     apiConfig: null,
     isInitialized: false,
     lastError: null,
     balances: {},
     createdAt: null,
+    activeAccount: null,
 };
 
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
@@ -65,7 +71,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
                 mode: action.payload.mode,
                 createdAt: action.payload.createdAt,
                 isInitialized: true,
-                connectionStatus: action.payload.mode === 'paper' ? 'connected' : 'disconnected',
+                connectionStatus: 'disconnected',  // Always need to connect to exchange
             };
         case 'SET_MODE':
             return { ...state, mode: action.payload };
@@ -75,6 +81,9 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
             return { ...state, apiConfig: action.payload };
         case 'SET_BALANCES':
             return { ...state, balances: action.payload };
+        case 'SET_ACTIVE_ACCOUNT':
+            // CRYPTOBOSS 2.0: Clear balances when switching accounts
+            return { ...state, activeAccount: action.payload, balances: {} };
         case 'SET_ERROR':
             return { ...state, lastError: action.payload };
         case 'RESET_SESSION':
@@ -116,43 +125,28 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 export function SessionProvider({ children }: { children: ReactNode }) {
     const [state, dispatch] = useReducer(sessionReducer, initialState);
 
-    // Initialize session on mount
+    // Initialize session on mount - default to TESTNET
     useEffect(() => {
         const sessionId = generateSessionId();
         dispatch({
             type: 'INIT_SESSION',
             payload: {
                 sessionId,
-                mode: 'paper',
+                mode: 'testnet',  // PAPER REMOVED
                 createdAt: new Date().toISOString(),
             },
         });
-    }, []);
+    }, []);;
 
-    // Switch trading mode
+    // Switch trading environment
     const switchMode = useCallback(async (newMode: TradingMode, apiConfig?: ApiConfig): Promise<boolean> => {
         try {
             dispatch({ type: 'SET_CONNECTION_STATUS', payload: 'connecting' });
             dispatch({ type: 'SET_ERROR', payload: null });
 
-            // For paper mode, no API validation needed
-            if (newMode === 'paper') {
-                const newSessionId = generateSessionId();
-                dispatch({
-                    type: 'INIT_SESSION',
-                    payload: {
-                        sessionId: newSessionId,
-                        mode: 'paper',
-                        createdAt: new Date().toISOString(),
-                    },
-                });
-                dispatch({ type: 'SET_CONNECTION_STATUS', payload: 'connected' });
-                return true;
-            }
-
-            // For testnet/live, validate API credentials
+            // PAPER MODE REMOVED - Always require API credentials
             if (!apiConfig || !apiConfig.apiKey || !apiConfig.apiSecret) {
-                dispatch({ type: 'SET_ERROR', payload: 'API credentials required for non-paper mode' });
+                dispatch({ type: 'SET_ERROR', payload: 'API credentials required' });
                 dispatch({ type: 'SET_CONNECTION_STATUS', payload: 'error' });
                 return false;
             }

@@ -142,7 +142,10 @@ class TestMLPipeline:
         labels = ml.create_labels(df, horizon=4, threshold_pct=0.5)
         
         assert len(labels) == len(df)
-        assert labels.dtype == int
+        # Check valid labels are integers (0 or 1)
+        valid_labels = labels.dropna()
+        assert valid_labels.isin([0, 1]).all()
+        assert len(valid_labels) == len(df) - 4
 
 
 if __name__ == "__main__":

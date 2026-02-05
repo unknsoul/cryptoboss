@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google';
 import { useState, useEffect } from 'react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { SessionProvider, useSession, TradingMode } from '../contexts/SessionContext';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { ApiKeyModal } from '../components/ApiKeyModal';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -15,6 +16,7 @@ type SystemStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
     const { state, switchMode, resetSession } = useSession();
+    const { user, activeAccount, isAuthenticated, logout } = useAuth();
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [systemStatus, setSystemStatus] = useState<SystemStatus>('healthy');
@@ -44,14 +46,9 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     };
 
     const handleModeChange = (newMode: TradingMode) => {
-        if (newMode === 'paper') {
-            // Switch to paper mode directly
-            switchMode('paper');
-        } else {
-            // For testnet/live, show API modal
-            setTargetMode(newMode);
-            setShowApiModal(true);
-        }
+        // PAPER REMOVED - always require API keys for testnet/live
+        setTargetMode(newMode);
+        setShowApiModal(true);
     };
 
     const handleApiSubmit = async (config: { apiKey: string; apiSecret: string; isValidated: boolean }) => {
@@ -97,17 +94,17 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
     const getModeColor = (mode: TradingMode) => {
         switch (mode) {
-            case 'paper': return 'bg-[rgba(91,122,157,0.15)] text-[#5b7a9d]';
             case 'testnet': return 'bg-[rgba(196,160,82,0.15)] text-[#c4a052]';
             case 'live': return 'bg-[rgba(166,84,84,0.15)] text-[#a65454]';
+            default: return 'bg-[rgba(196,160,82,0.15)] text-[#c4a052]'; // Default to testnet
         }
     };
 
     const getModeLabel = (mode: TradingMode) => {
         switch (mode) {
-            case 'paper': return '📄 PAPER';
-            case 'testnet': return '🔶 TESTNET';
+            case 'testnet': return '🟡 TESTNET';
             case 'live': return '🔴 LIVE';
+            default: return '🟡 TESTNET';
         }
     };
 
@@ -182,15 +179,8 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
                         {/* Right: Mode Selector + Kill Switch */}
                         <div className="flex items-center gap-3">
-                            {/* Mode Selector */}
+                            {/* Mode Selector - PAPER REMOVED */}
                             <div className="flex items-center gap-1 bg-[#1a1f26] rounded-md p-1">
-                                <button
-                                    onClick={() => handleModeChange('paper')}
-                                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${state.mode === 'paper' ? getModeColor('paper') : 'text-[#6b7280] hover:text-[#e7e9ea]'
-                                        }`}
-                                >
-                                    Paper
-                                </button>
                                 <button
                                     onClick={() => handleModeChange('testnet')}
                                     className={`px-2 py-1 rounded text-xs font-medium transition-colors ${state.mode === 'testnet' ? getModeColor('testnet') : 'text-[#6b7280] hover:text-[#e7e9ea]'
@@ -216,10 +206,10 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                             <button
                                 onClick={handleKillSwitch}
                                 className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${killSwitchStep === 2
-                                        ? 'bg-[#6b7280] text-white cursor-not-allowed'
-                                        : killSwitchStep === 1
-                                            ? 'bg-[#c44444] text-white animate-pulse'
-                                            : 'bg-[#a65454] text-white hover:bg-[#b66464]'
+                                    ? 'bg-[#6b7280] text-white cursor-not-allowed'
+                                    : killSwitchStep === 1
+                                        ? 'bg-[#c44444] text-white animate-pulse'
+                                        : 'bg-[#a65454] text-white hover:bg-[#b66464]'
                                     }`}
                                 disabled={killSwitchStep === 2}
                             >
@@ -227,6 +217,41 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                                 {killSwitchStep === 1 && 'CONFIRM'}
                                 {killSwitchStep === 2 && 'HALTED'}
                             </button>
+
+                            {/* v1.0.1: User & Account Indicator */}
+                            {isAuthenticated && user && (
+                                <div className="flex items-center gap-2 pl-3 border-l border-[#2d3640]">
+                                    {activeAccount && (
+                                        <span className={`badge text-xs ${activeAccount.environment === 'LIVE'
+                                            ? 'bg-red-500/20 text-red-300'
+                                            : 'bg-yellow-500/20 text-yellow-300'
+                                            }`}>
+                                            {activeAccount.environment}
+                                        </span>
+                                    )}
+                                    <a
+                                        href="/accounts"
+                                        className="text-xs text-[#8b98a5] hover:text-[#e7e9ea] transition"
+                                    >
+                                        {user.email.split('@')[0]}
+                                    </a>
+                                    <button
+                                        onClick={logout}
+                                        className="text-xs text-[#6b7280] hover:text-[#a65454] transition"
+                                        title="Logout"
+                                    >
+                                        ⏻
+                                    </button>
+                                </div>
+                            )}
+                            {!isAuthenticated && (
+                                <a
+                                    href="/auth/login"
+                                    className="text-xs text-[#5b7a9d] hover:text-[#e7e9ea] transition"
+                                >
+                                    Sign In
+                                </a>
+                            )}
                         </div>
                     </div>
                 </header>
@@ -259,13 +284,15 @@ export default function RootLayout({
     return (
         <html lang="en" className="dark">
             <head>
-                <title>CryptoBoss | Trading Control Dashboard</title>
+                <title>CryptoBoss v1.0.1 | Trading Control Dashboard</title>
                 <meta name="description" content="Professional crypto trading control panel" />
             </head>
             <body className={`${inter.className} bg-[#0f1419] text-[#e7e9ea] antialiased`}>
-                <SessionProvider>
-                    <DashboardContent>{children}</DashboardContent>
-                </SessionProvider>
+                <AuthProvider>
+                    <SessionProvider>
+                        <DashboardContent>{children}</DashboardContent>
+                    </SessionProvider>
+                </AuthProvider>
             </body>
         </html>
     );

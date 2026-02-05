@@ -100,12 +100,12 @@ export default function OverviewPage() {
         tradeBudget: { remaining: 0, total: 0, perContext: 0 }
     });
 
-    // v10.2: Safety metrics (displayed BEFORE profit metrics)
+    // v10.2: Safety metrics - MUST be fetched from backend, no fake defaults
     const [safetyMetrics, setSafetyMetrics] = useState({
-        no_trade_rate: 0.32,
-        permission_rejection_rate: 0.15,
-        capital_veto_rate: 0.08,
-        exchange_degradation_count: 1,
+        no_trade_rate: 0,
+        permission_rejection_rate: 0,
+        capital_veto_rate: 0,
+        exchange_degradation_count: 0,
         incident_freeze_count: 0,
         halt_count: 0,
         incident_state: 'normal' as 'normal' | 'degraded' | 'incident_freeze' | 'halted',
@@ -276,8 +276,8 @@ export default function OverviewPage() {
                         <div className="text-xs text-[#6b7280] mb-1">Incident State</div>
                         <div className="flex items-center gap-2">
                             <span className={`w-2 h-2 rounded-full ${safetyMetrics.incident_state === 'normal' ? 'bg-[#4a9268]' :
-                                    safetyMetrics.incident_state === 'degraded' ? 'bg-[#c9a227]' :
-                                        'bg-[#e06c75]'
+                                safetyMetrics.incident_state === 'degraded' ? 'bg-[#c9a227]' :
+                                    'bg-[#e06c75]'
                                 }`} />
                             <span className={`badge ${getIncidentStateColor(safetyMetrics.incident_state)}`}>
                                 {safetyMetrics.incident_state.toUpperCase().replace('_', ' ')}
@@ -289,8 +289,8 @@ export default function OverviewPage() {
                     <div className="card p-3">
                         <div className="text-xs text-[#6b7280] mb-1">No Trade Rate</div>
                         <div className={`text-lg font-mono ${getRateVariant(safetyMetrics.no_trade_rate) === 'success' ? 'text-[#4a9268]' :
-                                getRateVariant(safetyMetrics.no_trade_rate) === 'warning' ? 'text-[#c9a227]' :
-                                    'text-[#e06c75]'
+                            getRateVariant(safetyMetrics.no_trade_rate) === 'warning' ? 'text-[#c9a227]' :
+                                'text-[#e06c75]'
                             }`}>
                             {(safetyMetrics.no_trade_rate * 100).toFixed(1)}%
                         </div>
@@ -300,8 +300,8 @@ export default function OverviewPage() {
                     <div className="card p-3">
                         <div className="text-xs text-[#6b7280] mb-1">Permission Rejections</div>
                         <div className={`text-lg font-mono ${getRateVariant(safetyMetrics.permission_rejection_rate) === 'success' ? 'text-[#4a9268]' :
-                                getRateVariant(safetyMetrics.permission_rejection_rate) === 'warning' ? 'text-[#c9a227]' :
-                                    'text-[#e06c75]'
+                            getRateVariant(safetyMetrics.permission_rejection_rate) === 'warning' ? 'text-[#c9a227]' :
+                                'text-[#e06c75]'
                             }`}>
                             {(safetyMetrics.permission_rejection_rate * 100).toFixed(1)}%
                         </div>
@@ -311,8 +311,8 @@ export default function OverviewPage() {
                     <div className="card p-3">
                         <div className="text-xs text-[#6b7280] mb-1">Capital Vetoes</div>
                         <div className={`text-lg font-mono ${getRateVariant(safetyMetrics.capital_veto_rate) === 'success' ? 'text-[#4a9268]' :
-                                getRateVariant(safetyMetrics.capital_veto_rate) === 'warning' ? 'text-[#c9a227]' :
-                                    'text-[#e06c75]'
+                            getRateVariant(safetyMetrics.capital_veto_rate) === 'warning' ? 'text-[#c9a227]' :
+                                'text-[#e06c75]'
                             }`}>
                             {(safetyMetrics.capital_veto_rate * 100).toFixed(1)}%
                         </div>
@@ -527,10 +527,10 @@ export default function OverviewPage() {
                 <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">
                         <div className={`status-dot ${safetyMetrics.incident_state === 'normal' && !safetyMetrics.is_paused
-                                ? 'status-dot-healthy'
-                                : safetyMetrics.incident_state === 'degraded'
-                                    ? 'status-dot-warning'
-                                    : 'status-dot-error'
+                            ? 'status-dot-healthy'
+                            : safetyMetrics.incident_state === 'degraded'
+                                ? 'status-dot-warning'
+                                : 'status-dot-error'
                             }`} />
                         <span className="text-[#e7e9ea] font-medium">
                             {safetyMetrics.is_paused

@@ -1,373 +1,236 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Card } from '@/components/shared/Card';
-import { Badge } from '@/components/shared/Badge';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { StatusDot } from '@/components/shared/StatusDot';
+/**
+ * Operator Page - CRYPTOBOSS vFINAL
+ * 
+ * Purpose: System control panel - fetches from backend
+ * Rules:
+ * - NO mock data - fetch from /api/operator
+ * - Zero incident count for new accounts
+ */
 
-// Mock data - will be replaced with API calls
-const mockState = {
-    is_paused: false,
-    paused_at: null,
-    paused_by: null,
-    pause_reason: null,
-    requires_manual_recovery: false,
-    recovery_required_reason: null
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+interface OperatorState {
+    trading_paused: boolean;
+    pause_reason?: string;
+    last_action?: string;
+    last_action_by?: string;
+    uptime_seconds: number;
+}
+
+interface IncidentState {
+    state: string;
+    reason?: string;
+    since?: string;
+    auto_recoverable: boolean;
+}
+
+const emptyOperatorState: OperatorState = {
+    trading_paused: false,
+    uptime_seconds: 0
 };
 
-const mockIncidentState = {
+const emptyIncidentState: IncidentState = {
     state: 'normal',
-    since: new Date().toISOString(),
-    time_in_state_seconds: 3600
+    auto_recoverable: true
 };
-
-const mockActionLog = [
-    {
-        timestamp: new Date(Date.now() - 86400000).toISOString(),
-        action: 'manual_resume',
-        operator_id: 'admin',
-        reason: 'System verified healthy after maintenance',
-        success: true
-    },
-    {
-        timestamp: new Date(Date.now() - 90000000).toISOString(),
-        action: 'manual_pause',
-        operator_id: 'admin',
-        reason: 'Scheduled maintenance window',
-        success: true
-    }
-];
-
-type OperatorState = typeof mockState;
-type IncidentState = typeof mockIncidentState;
-type ActionLog = typeof mockActionLog[0];
 
 export default function OperatorPage() {
-    const [state, setState] = useState<OperatorState>(mockState);
-    const [incidentState, setIncidentState] = useState<IncidentState>(mockIncidentState);
-    const [actionLog, setActionLog] = useState<ActionLog[]>(mockActionLog);
-    const [reason, setReason] = useState('');
-    const [isConfirmOpen, setIsConfirmOpen] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
+    const { activeAccount, token } = useAuth();
+    const [state, setState] = useState<OperatorState>(emptyOperatorState);
+    const [incidentState, setIncidentState] = useState<IncidentState>(emptyIncidentState);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [actionLoading, setActionLoading] = useState(false);
+
+    const fetchState = useCallback(async () => {
+        if (!token) {
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const [opRes, incRes] = await Promise.all([
+                fetch(`${API_URL}/api/operator`, { headers: { 'Authorization': `Bearer ${token}` } }),
+                fetch(`${API_URL}/api/incident-state`, { headers: { 'Authorization': `Bearer ${token}` } })
+            ]);
+
+            if (opRes.ok) {
+                const opData = await opRes.json();
+                setState(opData.data || emptyOperatorState);
+            }
+            if (incRes.ok) {
+                const incData = await incRes.json();
+                setIncidentState(incData.data || emptyIncidentState);
+            }
+            setError(null);
+        } catch (e: any) {
+            console.error('Operator fetch error:', e);
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    }, [token]);
+
+    useEffect(() => {
+        setState(emptyOperatorState);
+        setIncidentState(emptyIncidentState);
+        setLoading(true);
+        fetchState();
+    }, [activeAccount, fetchState]);
+
+    useEffect(() => {
+        const interval = setInterval(fetchState, 10000);
+        return () => clearInterval(interval);
+    }, [fetchState]);
 
     const handlePause = async () => {
-        if (!reason.trim()) return;
-        setLoading(true);
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setState(prev => ({
-            ...prev,
-            is_paused: true,
-            paused_at: new Date().toISOString(),
-            paused_by: 'operator',
-            pause_reason: reason
-        }));
-        setActionLog(prev => [{
-            timestamp: new Date().toISOString(),
-            action: 'manual_pause',
-            operator_id: 'operator',
-            reason: reason,
-            success: true
-        }, ...prev]);
-        setReason('');
-        setIsConfirmOpen(null);
-        setLoading(false);
-    };
-
-    const handleResume = async () => {
-        if (!reason.trim()) return;
-        setLoading(true);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setState(prev => ({
-            ...prev,
-            is_paused: false,
-            paused_at: null,
-            paused_by: null,
-            pause_reason: null
-        }));
-        setActionLog(prev => [{
-            timestamp: new Date().toISOString(),
-            action: 'manual_resume',
-            operator_id: 'operator',
-            reason: reason,
-            success: true
-        }, ...prev]);
-        setReason('');
-        setIsConfirmOpen(null);
-        setLoading(false);
-    };
-
-    const handleRecover = async () => {
-        if (!reason.trim()) return;
-        setLoading(true);
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setState(prev => ({
-            ...prev,
-            is_paused: false,
-            requires_manual_recovery: false,
-            recovery_required_reason: null
-        }));
-        setIncidentState(prev => ({
-            ...prev,
-            state: 'normal',
-            since: new Date().toISOString()
-        }));
-        setActionLog(prev => [{
-            timestamp: new Date().toISOString(),
-            action: 'manual_recover',
-            operator_id: 'operator',
-            reason: reason,
-            success: true
-        }, ...prev]);
-        setReason('');
-        setIsConfirmOpen(null);
-        setLoading(false);
-    };
-
-    const getStateColor = (s: string): 'success' | 'warning' | 'danger' | 'neutral' => {
-        switch (s) {
-            case 'normal': return 'success';
-            case 'degraded': return 'warning';
-            case 'incident_freeze': return 'danger';
-            case 'halted': return 'danger';
-            default: return 'neutral';
+        if (!token) return;
+        setActionLoading(true);
+        try {
+            await fetch(`${API_URL}/api/operator/pause`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: 'Manual pause from dashboard' })
+            });
+            fetchState();
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setActionLoading(false);
         }
     };
 
-    const formatTime = (seconds: number): string => {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        return `${hours}h ${minutes}m`;
+    const handleResume = async () => {
+        if (!token) return;
+        setActionLoading(true);
+        try {
+            await fetch(`${API_URL}/api/operator/resume`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            fetchState();
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const formatUptime = (seconds: number) => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        return `${h}h ${m}m`;
+    };
+
+    const getStateColor = (s: string) => {
+        switch (s) {
+            case 'normal': return 'bg-green-500/20 text-green-400';
+            case 'degraded': return 'bg-yellow-500/20 text-yellow-400';
+            case 'incident_freeze': return 'bg-orange-500/20 text-orange-400';
+            case 'halted': return 'bg-red-500/20 text-red-400';
+            default: return 'bg-gray-500/20 text-gray-400';
+        }
     };
 
     return (
-        <div className="space-y-6">
-            <PageHeader
-                title="Operator Control"
-                description="Manual system control - pause, resume, and recover from incidents"
-            />
+        <div className="p-6 space-y-6">
+            <div className="mb-8">
+                <h1 className="text-3xl font-bold text-white mb-1">Operator Panel</h1>
+                <p className="text-gray-400 text-sm">
+                    {activeAccount ? `Account: ${activeAccount.label}` : 'No account selected'}
+                </p>
+            </div>
 
-            {/* System State Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card title="System Status">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <StatusDot
-                                status={state.is_paused ? 'warning' : 'success'}
-                                pulse={!state.is_paused}
-                            />
-                            <span className="text-lg font-medium text-[#e7e9ea]">
-                                {state.is_paused ? 'PAUSED' : 'RUNNING'}
+            {loading && <div className="text-center py-12 text-gray-400">Loading...</div>}
+            {error && <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 text-red-400 mb-4">Error: {error}</div>}
+
+            {!loading && !activeAccount && (
+                <div className="text-center py-12">
+                    <div className="text-5xl mb-4">🔐</div>
+                    <div className="text-xl text-white mb-2">No Account Selected</div>
+                    <div className="text-gray-400">Please select an exchange account</div>
+                </div>
+            )}
+
+            {!loading && activeAccount && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Trading Status */}
+                    <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-6">
+                        <h2 className="text-white font-semibold mb-4">Trading Status</h2>
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-gray-400">Status</span>
+                            <span className={`px-3 py-1 rounded font-bold ${state.trading_paused ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'
+                                }`}>
+                                {state.trading_paused ? 'PAUSED' : 'ACTIVE'}
                             </span>
                         </div>
-                        {state.paused_by && (
-                            <span className="text-sm text-[#8b98a5]">
-                                by {state.paused_by}
-                            </span>
+                        {state.pause_reason && (
+                            <div className="text-sm text-gray-400 mb-4">
+                                Reason: {state.pause_reason}
+                            </div>
                         )}
+                        <div className="flex gap-3">
+                            <button
+                                onClick={handlePause}
+                                disabled={state.trading_paused || actionLoading}
+                                className="flex-1 py-2 px-4 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50"
+                            >
+                                Pause
+                            </button>
+                            <button
+                                onClick={handleResume}
+                                disabled={!state.trading_paused || actionLoading}
+                                className="flex-1 py-2 px-4 rounded bg-green-500/20 text-green-400 hover:bg-green-500/30 disabled:opacity-50"
+                            >
+                                Resume
+                            </button>
+                        </div>
                     </div>
-                    {state.pause_reason && (
-                        <p className="mt-3 text-sm text-[#8b98a5]">
-                            Reason: {state.pause_reason}
-                        </p>
-                    )}
-                </Card>
 
-                <Card title="Incident State">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <StatusDot
-                                status={getStateColor(incidentState.state)}
-                                pulse={incidentState.state !== 'normal'}
-                            />
-                            <span className="text-lg font-medium text-[#e7e9ea] uppercase">
+                    {/* Incident State */}
+                    <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-6">
+                        <h2 className="text-white font-semibold mb-4">Incident State</h2>
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-gray-400">Current State</span>
+                            <span className={`px-3 py-1 rounded font-bold uppercase ${getStateColor(incidentState.state)}`}>
                                 {incidentState.state.replace('_', ' ')}
                             </span>
                         </div>
-                    </div>
-                    <p className="mt-3 text-sm text-[#8b98a5]">
-                        Time in state: {formatTime(incidentState.time_in_state_seconds)}
-                    </p>
-                </Card>
-
-                <Card title="Recovery Required">
-                    <div className="flex items-center justify-between">
-                        <Badge
-                            variant={state.requires_manual_recovery ? 'danger' : 'success'}
-                        >
-                            {state.requires_manual_recovery ? 'YES' : 'NO'}
-                        </Badge>
-                    </div>
-                    {state.recovery_required_reason && (
-                        <p className="mt-3 text-sm text-[#e06c75]">
-                            {state.recovery_required_reason}
-                        </p>
-                    )}
-                </Card>
-            </div>
-
-            {/* Control Actions */}
-            <Card title="Control Actions">
-                <div className="space-y-4">
-                    <p className="text-sm text-[#8b98a5]">
-                        All operator actions are logged and require a reason.
-                        <span className="text-[#e06c75]"> These actions cannot override risk or capital vetoes.</span>
-                    </p>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* Pause Button */}
-                        <div className={`p-4 rounded-lg border ${state.is_paused ? 'bg-[#1a1f26] border-[#2d3640] opacity-50' : 'bg-[#141920] border-[#2d3640] hover:border-[#c9a227]'} transition-all`}>
-                            <h4 className="font-medium text-[#e7e9ea] mb-2">Pause Trading</h4>
-                            <p className="text-sm text-[#8b98a5] mb-3">
-                                Immediately pause all trading activity.
-                            </p>
-                            <button
-                                onClick={() => setIsConfirmOpen('pause')}
-                                disabled={state.is_paused}
-                                className="w-full py-2 px-4 bg-[#c9a227] text-black font-medium rounded-md hover:bg-[#d4b13c] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                                Pause System
-                            </button>
-                        </div>
-
-                        {/* Resume Button */}
-                        <div className={`p-4 rounded-lg border ${!state.is_paused || state.requires_manual_recovery ? 'bg-[#1a1f26] border-[#2d3640] opacity-50' : 'bg-[#141920] border-[#2d3640] hover:border-[#4a9268]'} transition-all`}>
-                            <h4 className="font-medium text-[#e7e9ea] mb-2">Resume Trading</h4>
-                            <p className="text-sm text-[#8b98a5] mb-3">
-                                Resume after health validation passes.
-                            </p>
-                            <button
-                                onClick={() => setIsConfirmOpen('resume')}
-                                disabled={!state.is_paused || state.requires_manual_recovery}
-                                className="w-full py-2 px-4 bg-[#4a9268] text-white font-medium rounded-md hover:bg-[#5aa878] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                                Resume System
-                            </button>
-                        </div>
-
-                        {/* Recover Button */}
-                        <div className={`p-4 rounded-lg border ${!state.requires_manual_recovery ? 'bg-[#1a1f26] border-[#2d3640] opacity-50' : 'bg-[#141920] border-[#e06c75]/20 hover:border-[#e06c75]'} transition-all`}>
-                            <h4 className="font-medium text-[#e7e9ea] mb-2">Recovery from Halt</h4>
-                            <p className="text-sm text-[#8b98a5] mb-3">
-                                Recover after critical incident resolution.
-                            </p>
-                            <button
-                                onClick={() => setIsConfirmOpen('recover')}
-                                disabled={!state.requires_manual_recovery}
-                                className="w-full py-2 px-4 bg-[#e06c75] text-white font-medium rounded-md hover:bg-[#e58089] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                                Recover System
-                            </button>
+                        {incidentState.reason && (
+                            <div className="text-sm text-gray-400 mb-2">
+                                Reason: {incidentState.reason}
+                            </div>
+                        )}
+                        <div className="text-sm text-gray-500">
+                            Auto-recoverable: {incidentState.auto_recoverable ? 'Yes' : 'No'}
                         </div>
                     </div>
-                </div>
-            </Card>
 
-            {/* Action Log */}
-            <Card title="Operator Action Log" subtitle="Last 24 hours">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b border-[#2d3640]">
-                                <th className="text-left py-3 px-4 text-sm font-medium text-[#8b98a5]">Time</th>
-                                <th className="text-left py-3 px-4 text-sm font-medium text-[#8b98a5]">Action</th>
-                                <th className="text-left py-3 px-4 text-sm font-medium text-[#8b98a5]">Operator</th>
-                                <th className="text-left py-3 px-4 text-sm font-medium text-[#8b98a5]">Reason</th>
-                                <th className="text-left py-3 px-4 text-sm font-medium text-[#8b98a5]">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {actionLog.length === 0 ? (
-                                <tr>
-                                    <td colSpan={5} className="py-8 text-center text-[#8b98a5]">
-                                        No actions recorded in the last 24 hours
-                                    </td>
-                                </tr>
-                            ) : (
-                                actionLog.map((log, i) => (
-                                    <tr key={i} className="border-b border-[#2d3640]/50 hover:bg-[#1a1f26] transition-colors">
-                                        <td className="py-3 px-4 text-sm text-[#8b98a5]">
-                                            {new Date(log.timestamp).toLocaleString()}
-                                        </td>
-                                        <td className="py-3 px-4">
-                                            <Badge variant={
-                                                log.action === 'manual_pause' ? 'warning' :
-                                                    log.action === 'manual_resume' ? 'success' :
-                                                        log.action === 'manual_recover' ? 'info' : 'neutral'
-                                            }>
-                                                {log.action.replace('_', ' ').toUpperCase()}
-                                            </Badge>
-                                        </td>
-                                        <td className="py-3 px-4 text-sm text-[#e7e9ea] font-mono">
-                                            {log.operator_id}
-                                        </td>
-                                        <td className="py-3 px-4 text-sm text-[#8b98a5] max-w-xs truncate">
-                                            {log.reason}
-                                        </td>
-                                        <td className="py-3 px-4">
-                                            <StatusDot status={log.success ? 'success' : 'danger'} />
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </Card>
-
-            {/* Confirmation Modal */}
-            {isConfirmOpen && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-                    <div className="bg-[#141920] border border-[#2d3640] rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
-                        <h3 className="text-lg font-semibold text-[#e7e9ea] mb-2">
-                            {isConfirmOpen === 'pause' && 'Confirm System Pause'}
-                            {isConfirmOpen === 'resume' && 'Confirm System Resume'}
-                            {isConfirmOpen === 'recover' && 'Confirm System Recovery'}
-                        </h3>
-                        <p className="text-sm text-[#8b98a5] mb-4">
-                            {isConfirmOpen === 'pause' && 'This will immediately stop all trading activity.'}
-                            {isConfirmOpen === 'resume' && 'System health will be validated before resuming.'}
-                            {isConfirmOpen === 'recover' && 'This will attempt to recover from a critical halt. Ensure the issue is fully resolved.'}
-                        </p>
-
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-[#8b98a5] mb-2">
-                                Reason (required)
-                            </label>
-                            <textarea
-                                value={reason}
-                                onChange={(e) => setReason(e.target.value)}
-                                placeholder="Enter the reason for this action..."
-                                className="w-full px-3 py-2 bg-[#0f1419] border border-[#2d3640] rounded-md text-[#e7e9ea] placeholder-[#6b7280] focus:outline-none focus:border-[#5b7a9d] resize-none"
-                                rows={3}
-                            />
-                        </div>
-
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => {
-                                    setIsConfirmOpen(null);
-                                    setReason('');
-                                }}
-                                className="flex-1 py-2 px-4 border border-[#2d3640] text-[#8b98a5] rounded-md hover:bg-[#1a1f26] transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={() => {
-                                    if (isConfirmOpen === 'pause') handlePause();
-                                    if (isConfirmOpen === 'resume') handleResume();
-                                    if (isConfirmOpen === 'recover') handleRecover();
-                                }}
-                                disabled={!reason.trim() || loading}
-                                className={`flex-1 py-2 px-4 font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${isConfirmOpen === 'pause' ? 'bg-[#c9a227] text-black hover:bg-[#d4b13c]' :
-                                        isConfirmOpen === 'resume' ? 'bg-[#4a9268] text-white hover:bg-[#5aa878]' :
-                                            'bg-[#e06c75] text-white hover:bg-[#e58089]'
-                                    }`}
-                            >
-                                {loading ? 'Processing...' : 'Confirm'}
-                            </button>
+                    {/* System Info */}
+                    <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-6 lg:col-span-2">
+                        <h2 className="text-white font-semibold mb-4">System Info</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                            <div>
+                                <div className="text-gray-400 text-sm">Uptime</div>
+                                <div className="text-white font-medium">{formatUptime(state.uptime_seconds)}</div>
+                            </div>
+                            <div>
+                                <div className="text-gray-400 text-sm">Last Action</div>
+                                <div className="text-white font-medium">{state.last_action || 'None'}</div>
+                            </div>
+                            <div>
+                                <div className="text-gray-400 text-sm">Action By</div>
+                                <div className="text-white font-medium">{state.last_action_by || '-'}</div>
+                            </div>
+                            <div>
+                                <div className="text-gray-400 text-sm">Account</div>
+                                <div className="text-white font-medium">{activeAccount?.environment || '-'}</div>
+                            </div>
                         </div>
                     </div>
                 </div>

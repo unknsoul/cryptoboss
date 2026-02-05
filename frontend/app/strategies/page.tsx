@@ -1,127 +1,147 @@
-import { Card } from '../../components/shared/Card';
-import { Badge } from '../../components/shared/Badge';
-import { PageHeader } from '../../components/layout/PageHeader';
+'use client';
 
-const mockStrategies = [
-    {
-        id: 'dca_btc',
-        name: 'DCA Bitcoin',
-        enabled: true,
-        healthScore: 0.85,
-        recentDecay: 0.92,
-        wins: 12,
-        losses: 3,
-        lastTrade: '2026-01-27T20:15:00',
-    },
-    {
-        id: 'grid_btc',
-        name: 'Grid Trading BTC',
-        enabled: true,
-        healthScore: 0.72,
-        recentDecay: 0.85,
-        wins: 8,
-        losses: 4,
-        lastTrade: '2026-01-27T18:30:00',
-    },
-    {
-        id: 'scalp_eth',
-        name: 'Scalp ETH',
-        enabled: false,
-        healthScore: 0.45,
-        recentDecay: 0.60,
-        wins: 5,
-        losses: 7,
-        lastTrade: '2026-01-26T14:00:00',
-    },
-];
+/**
+ * Strategies Page - CRYPTOBOSS vFINAL
+ * 
+ * Purpose: Display strategy status from backend
+ * Rules:
+ * - NO mock data - fetch from /api/strategies
+ * - Empty state for new accounts
+ */
+
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+interface Strategy {
+    id: string;
+    name: string;
+    enabled: boolean;
+    healthScore: number;
+    recentDecay: number;
+    wins: number;
+    losses: number;
+    lastTrade?: string;
+}
 
 export default function StrategiesPage() {
+    const { activeAccount, token } = useAuth();
+    const [strategies, setStrategies] = useState<Strategy[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchStrategies = useCallback(async () => {
+        if (!token) {
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/api/strategies`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (!response.ok) throw new Error('Failed to fetch strategies');
+            const data = await response.json();
+            setStrategies(data.data?.strategies || []);
+            setError(null);
+        } catch (e: any) {
+            console.error('Strategies fetch error:', e);
+            setError(e.message);
+            setStrategies([]);
+        } finally {
+            setLoading(false);
+        }
+    }, [token]);
+
+    useEffect(() => {
+        setStrategies([]);
+        setLoading(true);
+        fetchStrategies();
+    }, [activeAccount, fetchStrategies]);
+
     return (
-        <div>
-            <PageHeader
-                title="Strategies"
-                description="Control without micromanagement – no manual entry buttons"
-            />
+        <div className="p-6 space-y-6">
+            {/* Header */}
+            <div className="mb-8">
+                <h1 className="text-3xl font-bold text-white mb-1">Strategies</h1>
+                <p className="text-gray-400 text-sm">
+                    {activeAccount ? `Account: ${activeAccount.label}` : 'No account selected'}
+                </p>
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {mockStrategies.map((strategy) => (
-                    <Card key={strategy.id}>
-                        <div className="space-y-4">
-                            {/* Header */}
-                            <div className="flex items-center justify-between">
+            {loading && <div className="text-center py-12 text-gray-400">Loading strategies...</div>}
+            {error && <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 text-red-400">Error: {error}</div>}
+
+            {!loading && !activeAccount && (
+                <div className="text-center py-12">
+                    <div className="text-5xl mb-4">🔐</div>
+                    <div className="text-xl text-white mb-2">No Account Selected</div>
+                    <div className="text-gray-400">Please select an exchange account</div>
+                </div>
+            )}
+
+            {!loading && activeAccount && strategies.length === 0 && (
+                <div className="text-center py-12 bg-[#1d2229] border border-[#2d3640] rounded-xl">
+                    <div className="text-5xl mb-4">📋</div>
+                    <div className="text-xl text-white mb-2">No Strategies Configured</div>
+                    <div className="text-gray-400">This account has no active strategies</div>
+                </div>
+            )}
+
+            {!loading && activeAccount && strategies.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {strategies.map((strategy) => (
+                        <div key={strategy.id} className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-6">
+                            <div className="flex items-center justify-between mb-4">
                                 <span className="text-lg font-medium text-white">{strategy.name}</span>
-                                <Badge variant={strategy.enabled ? 'success' : 'neutral'}>
+                                <span className={`px-2 py-0.5 rounded text-xs ${strategy.enabled ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'
+                                    }`}>
                                     {strategy.enabled ? 'ENABLED' : 'DISABLED'}
-                                </Badge>
-                            </div>
-
-                            {/* Health Score */}
-                            <div>
-                                <div className="flex items-center justify-between text-sm mb-1">
-                                    <span className="text-[#8b98a5]">Health Score</span>
-                                    <span className={`font-medium ${strategy.healthScore >= 0.7 ? 'text-green-400' :
-                                            strategy.healthScore >= 0.5 ? 'text-yellow-400' : 'text-red-400'
-                                        }`}>
-                                        {(strategy.healthScore * 100).toFixed(0)}%
-                                    </span>
-                                </div>
-                                <div className="h-2 bg-[#242b33] rounded-full overflow-hidden">
-                                    <div
-                                        className={`h-full ${strategy.healthScore >= 0.7 ? 'bg-green-500' :
-                                                strategy.healthScore >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'
-                                            }`}
-                                        style={{ width: `${strategy.healthScore * 100}%` }}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Recent Performance Decay */}
-                            <div>
-                                <div className="flex items-center justify-between text-sm mb-1">
-                                    <span className="text-[#8b98a5]">Recent Performance</span>
-                                    <span className="font-medium text-white">
-                                        {(strategy.recentDecay * 100).toFixed(0)}%
-                                    </span>
-                                </div>
-                                <div className="h-2 bg-[#242b33] rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full bg-blue-500"
-                                        style={{ width: `${strategy.recentDecay * 100}%` }}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Win/Loss */}
-                            <div className="flex items-center justify-between text-sm">
-                                <span className="text-[#8b98a5]">Win/Loss</span>
-                                <span>
-                                    <span className="text-green-400">{strategy.wins}W</span>
-                                    {' / '}
-                                    <span className="text-red-400">{strategy.losses}L</span>
                                 </span>
                             </div>
 
-                            {/* Last Trade */}
-                            <div className="text-xs text-[#6b7280]">
-                                Last trade: {new Date(strategy.lastTrade).toLocaleString()}
+                            <div className="space-y-3">
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-400">Health Score</span>
+                                        <span className={`${strategy.healthScore >= 0.7 ? 'text-green-400' : strategy.healthScore >= 0.5 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                            {(strategy.healthScore * 100).toFixed(0)}%
+                                        </span>
+                                    </div>
+                                    <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full ${strategy.healthScore >= 0.7 ? 'bg-green-500' : strategy.healthScore >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                            style={{ width: `${strategy.healthScore * 100}%` }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-400">Win/Loss</span>
+                                    <span>
+                                        <span className="text-green-400">{strategy.wins}W</span>
+                                        {' / '}
+                                        <span className="text-red-400">{strategy.losses}L</span>
+                                    </span>
+                                </div>
+
+                                {strategy.lastTrade && (
+                                    <div className="text-xs text-gray-600">
+                                        Last trade: {new Date(strategy.lastTrade).toLocaleString()}
+                                    </div>
+                                )}
                             </div>
                         </div>
-                    </Card>
-                ))}
-            </div>
+                    ))}
+                </div>
+            )}
 
-            {/* Info Notice */}
-            <div className="mt-6 p-4 bg-[#1a1f26] rounded-lg border border-[#2d3640]">
-                <div className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <div>
-                        <p className="text-sm text-white font-medium">Strategies propose, they don't execute</p>
-                        <p className="text-xs text-[#8b98a5] mt-1">
-                            All trades go through the 9-stage execution flow. No manual trade buttons available.
-                        </p>
-                    </div>
+            <div className="mt-6 p-4 bg-gray-800/50 rounded-lg">
+                <div className="flex items-start gap-3 text-sm text-gray-400">
+                    <span className="text-blue-400">ℹ️</span>
+                    <p>Strategies propose, they don't execute. All trades go through the execution flow.</p>
                 </div>
             </div>
         </div>

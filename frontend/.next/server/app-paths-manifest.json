@@ -1,10 +1,7 @@
 {
-  "/page": "app/page.js",
-  "/decisions/page": "app/decisions/page.js",
   "/live/page": "app/live/page.js",
-  "/positions/page": "app/positions/page.js",
-  "/risk/page": "app/risk/page.js",
   "/operator/page": "app/operator/page.js",
   "/incidents/page": "app/incidents/page.js",
-  "/drift/page": "app/drift/page.js"
+  "/drift/page": "app/drift/page.js",
+  "/page": "app/page.js"
 }

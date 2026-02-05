@@ -121,8 +121,8 @@ class TradingEngine:
         self.event_bus = get_event_bus()
         self.risk_guardian = get_risk_guardian(portfolio_value)
         
-        # Execution router
-        exec_mode = ExecutionMode.LIVE if mode == "live" else ExecutionMode.PAPER
+        # Execution router - PAPER mode removed, use TESTNET for non-live
+        exec_mode = ExecutionMode.LIVE if mode == "live" else ExecutionMode.TESTNET
         self.execution_router = ExecutionRouter(
             mode=exec_mode,
             exchange_client=exchange_client,

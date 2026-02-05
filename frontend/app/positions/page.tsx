@@ -1,234 +1,304 @@
 'use client';
 
 /**
- * Positions Page
+ * Positions Page - CRYPTOBOSS vFINAL
  * 
- * Purpose: Trade transparency
+ * Purpose: Trade transparency - shows ONLY backend data
  * Rules:
- * - No manual close buttons in live mode
- * - Clear separation between paper and live
- * - Entry reasoning visible
+ * - NO mock data - fetch from /api/positions
+ * - Empty state for new users
+ * - Re-fetch on account change
  */
 
-// Mock positions data
-const positions = [
-    {
-        id: 1,
-        symbol: 'BTC/USDT',
-        side: 'LONG',
-        entryPrice: 88920.00,
-        currentPrice: 89168.42,
-        size: 0.025,
-        exposure: 2229.21,
-        unrealizedPnL: 6.21,
-        pnlPercent: 0.28,
-        entryTime: '2024-01-28 12:45:00',
-        entryReason: 'Bias: LONG_BIAS (72%), Context: TRENDING_UP, Signal: Higher low confirmed',
-        stopLoss: 87500.00,
-        takeProfit: 92000.00,
-        mode: 'paper' as const,
-    },
-    {
-        id: 2,
-        symbol: 'ETH/USDT',
-        side: 'LONG',
-        entryPrice: 3150.00,
-        currentPrice: 3185.50,
-        size: 0.7,
-        exposure: 2229.85,
-        unrealizedPnL: 24.85,
-        pnlPercent: 1.13,
-        entryTime: '2024-01-28 11:30:00',
-        entryReason: 'Bias: LONG_BIAS (68%), Context: RANGING, Signal: Support bounce',
-        stopLoss: 3050.00,
-        takeProfit: 3350.00,
-        mode: 'paper' as const,
-    },
-];
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 
-const closedPositions = [
-    {
-        id: 101,
-        symbol: 'BTC/USDT',
-        side: 'SHORT',
-        entryPrice: 89500.00,
-        exitPrice: 89050.00,
-        size: 0.02,
-        realizedPnL: 9.00,
-        pnlPercent: 0.50,
-        entryTime: '2024-01-28 09:00:00',
-        exitTime: '2024-01-28 10:30:00',
-        exitReason: 'Take profit reached',
-        mode: 'paper' as const,
-    },
-];
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-function PositionCard({ position, isOpen = true }: { position: typeof positions[0]; isOpen?: boolean }) {
-    const pnlColor = position.unrealizedPnL >= 0 ? 'text-[#4a9268]' : 'text-[#a65454]';
-    const sideColor = position.side === 'LONG' ? 'badge-success' : 'badge-danger';
+interface Position {
+    id: number;
+    symbol: string;
+    side: string;
+    entryPrice: number;
+    currentPrice: number;
+    size: number;
+    exposure: number;
+    unrealizedPnL: number;
+    pnlPercent: number;
+    entryTime: string;
+    entryReason?: string;
+    stopLoss?: number;
+    takeProfit?: number;
+}
+
+interface ClosedPosition {
+    id: number;
+    symbol: string;
+    side: string;
+    entryPrice: number;
+    exitPrice: number;
+    size: number;
+    realizedPnL: number;
+    pnlPercent: number;
+    entryTime: string;
+    exitTime: string;
+    exitReason?: string;
+}
+
+function PositionCard({ position }: { position: Position }) {
+    const pnlColor = position.unrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400';
+    const sideColor = position.side === 'LONG' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400';
 
     return (
-        <div className="card">
+        <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                    <span className="text-[#e7e9ea] font-medium">{position.symbol}</span>
-                    <span className={`badge ${sideColor}`}>{position.side}</span>
-                    <span className="badge badge-neutral text-xs">{position.mode.toUpperCase()}</span>
+                    <span className="text-white font-medium">{position.symbol}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs ${sideColor}`}>{position.side}</span>
                 </div>
-                <span className={`value-md ${pnlColor}`}>
+                <span className={`font-medium ${pnlColor}`}>
                     {position.unrealizedPnL >= 0 ? '+' : ''}${position.unrealizedPnL.toFixed(2)}
                     <span className="text-sm ml-1">({position.pnlPercent.toFixed(2)}%)</span>
                 </span>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
                 <div>
-                    <span className="label block">Entry Price</span>
-                    <span className="text-[#e7e9ea]">${position.entryPrice.toLocaleString()}</span>
+                    <span className="text-gray-500 block">Entry Price</span>
+                    <span className="text-white">${position.entryPrice.toLocaleString()}</span>
                 </div>
                 <div>
-                    <span className="label block">Current Price</span>
-                    <span className="text-[#e7e9ea]">${position.currentPrice.toLocaleString()}</span>
+                    <span className="text-gray-500 block">Current Price</span>
+                    <span className="text-white">${position.currentPrice.toLocaleString()}</span>
                 </div>
                 <div>
-                    <span className="label block">Size</span>
-                    <span className="text-[#e7e9ea]">{position.size}</span>
+                    <span className="text-gray-500 block">Size</span>
+                    <span className="text-white">{position.size}</span>
                 </div>
                 <div>
-                    <span className="label block">Exposure</span>
-                    <span className="text-[#e7e9ea]">${position.exposure.toLocaleString()}</span>
-                </div>
-            </div>
-
-            {/* Entry Reasoning - Key for explainability */}
-            <div className="bg-[#1a1f26] rounded-md p-3 mb-4">
-                <span className="label block mb-1">Entry Reasoning</span>
-                <p className="text-sm text-[#8b98a5]">{position.entryReason}</p>
-            </div>
-
-            {/* Exit Conditions */}
-            <div className="grid grid-cols-2 gap-4">
-                <div>
-                    <span className="label block">Stop Loss</span>
-                    <span className="text-[#a65454]">${position.stopLoss.toLocaleString()}</span>
-                </div>
-                <div>
-                    <span className="label block">Take Profit</span>
-                    <span className="text-[#4a9268]">${position.takeProfit.toLocaleString()}</span>
+                    <span className="text-gray-500 block">Exposure</span>
+                    <span className="text-white">${position.exposure.toLocaleString()}</span>
                 </div>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-[#2d3640]">
-                <span className="text-xs text-[#6b7280]">Opened: {position.entryTime}</span>
+            {position.entryReason && (
+                <div className="bg-gray-800/50 rounded-md p-3 mb-4">
+                    <span className="text-gray-500 block text-xs mb-1">Entry Reasoning</span>
+                    <p className="text-sm text-gray-400">{position.entryReason}</p>
+                </div>
+            )}
+
+            {(position.stopLoss || position.takeProfit) && (
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                    {position.stopLoss && (
+                        <div>
+                            <span className="text-gray-500 block">Stop Loss</span>
+                            <span className="text-red-400">${position.stopLoss.toLocaleString()}</span>
+                        </div>
+                    )}
+                    {position.takeProfit && (
+                        <div>
+                            <span className="text-gray-500 block">Take Profit</span>
+                            <span className="text-green-400">${position.takeProfit.toLocaleString()}</span>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className="mt-4 pt-4 border-t border-gray-700">
+                <span className="text-xs text-gray-600">Opened: {position.entryTime}</span>
             </div>
         </div>
     );
 }
 
 export default function PositionsPage() {
+    const { activeAccount, token } = useAuth();
+    const [positions, setPositions] = useState<Position[]>([]);
+    const [closedPositions, setClosedPositions] = useState<ClosedPosition[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchPositions = useCallback(async () => {
+        if (!token) {
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_URL}/api/positions`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch positions');
+            }
+
+            const data = await response.json();
+
+            // Backend returns empty array = new account with no positions
+            setPositions(data.data?.positions || []);
+            setClosedPositions(data.data?.closed_today || []);
+            setError(null);
+        } catch (e: any) {
+            console.error('Positions fetch error:', e);
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    }, [token]);
+
+    // Fetch on mount and when account changes
+    useEffect(() => {
+        setPositions([]);
+        setClosedPositions([]);
+        setLoading(true);
+        fetchPositions();
+    }, [activeAccount, fetchPositions]);
+
+    // Refresh every 10 seconds
+    useEffect(() => {
+        const interval = setInterval(fetchPositions, 10000);
+        return () => clearInterval(interval);
+    }, [fetchPositions]);
+
+    const totalExposure = positions.reduce((sum, p) => sum + (p.exposure || 0), 0);
+    const totalUnrealizedPnL = positions.reduce((sum, p) => sum + (p.unrealizedPnL || 0), 0);
+
     return (
-        <div className="space-y-6">
+        <div className="p-6 space-y-6">
             {/* Page Header */}
             <div className="mb-8">
-                <h1 className="heading-lg mb-1">Positions</h1>
-                <p className="text-[#8b98a5] text-sm">
-                    Trade transparency — every position is explainable
+                <h1 className="text-3xl font-bold text-white mb-1">Positions</h1>
+                <p className="text-gray-400 text-sm">
+                    {activeAccount
+                        ? `Account: ${activeAccount.label}`
+                        : 'No account selected'}
                 </p>
             </div>
 
-            {/* Summary Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="card text-center">
-                    <span className="label">Open Positions</span>
-                    <span className="value-lg block mt-1">{positions.length}</span>
+            {/* Loading State */}
+            {loading && (
+                <div className="text-center py-12">
+                    <div className="text-gray-400">Loading positions...</div>
                 </div>
-                <div className="card text-center">
-                    <span className="label">Total Exposure</span>
-                    <span className="value-lg block mt-1">
-                        ${positions.reduce((sum, p) => sum + p.exposure, 0).toLocaleString()}
-                    </span>
-                </div>
-                <div className="card text-center">
-                    <span className="label">Unrealized P&L</span>
-                    <span className={`value-lg block mt-1 ${positions.reduce((sum, p) => sum + p.unrealizedPnL, 0) >= 0
-                            ? 'text-[#4a9268]' : 'text-[#a65454]'
-                        }`}>
-                        +${positions.reduce((sum, p) => sum + p.unrealizedPnL, 0).toFixed(2)}
-                    </span>
-                </div>
-                <div className="card text-center">
-                    <span className="label">Today's Closed</span>
-                    <span className="value-lg block mt-1">{closedPositions.length}</span>
-                </div>
-            </div>
+            )}
 
-            {/* Open Positions */}
-            <div>
-                <h2 className="heading-md mb-4">Open Positions</h2>
-                {positions.length > 0 ? (
-                    <div className="space-y-4">
-                        {positions.map((position) => (
-                            <PositionCard key={position.id} position={position} isOpen={true} />
-                        ))}
+            {/* Error State */}
+            {error && (
+                <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 text-red-400">
+                    Error: {error}
+                </div>
+            )}
+
+            {/* No Account Selected */}
+            {!loading && !activeAccount && (
+                <div className="text-center py-12">
+                    <div className="text-5xl mb-4">🔐</div>
+                    <div className="text-xl text-white mb-2">No Account Selected</div>
+                    <div className="text-gray-400">
+                        Please select an exchange account to view positions
                     </div>
-                ) : (
-                    <div className="empty-state">
-                        <div className="empty-state-icon">📭</div>
-                        <div className="empty-state-title">No Open Positions</div>
-                        <div className="empty-state-description">
-                            The system has no active positions. This is a normal state.
+                </div>
+            )}
+
+            {/* Has Account - Show Data */}
+            {!loading && activeAccount && (
+                <>
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-4 text-center">
+                            <span className="text-gray-400 text-sm">Open Positions</span>
+                            <span className="text-2xl font-bold text-white block mt-1">{positions.length}</span>
+                        </div>
+                        <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-4 text-center">
+                            <span className="text-gray-400 text-sm">Total Exposure</span>
+                            <span className="text-2xl font-bold text-white block mt-1">
+                                ${totalExposure.toLocaleString()}
+                            </span>
+                        </div>
+                        <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-4 text-center">
+                            <span className="text-gray-400 text-sm">Unrealized P&L</span>
+                            <span className={`text-2xl font-bold block mt-1 ${totalUnrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'
+                                }`}>
+                                {totalUnrealizedPnL >= 0 ? '+' : ''}${totalUnrealizedPnL.toFixed(2)}
+                            </span>
+                        </div>
+                        <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-4 text-center">
+                            <span className="text-gray-400 text-sm">Closed Today</span>
+                            <span className="text-2xl font-bold text-white block mt-1">{closedPositions.length}</span>
                         </div>
                     </div>
-                )}
-            </div>
 
-            {/* Closed Positions Today */}
-            <div className="mt-8">
-                <h2 className="heading-md mb-4">Closed Today</h2>
-                <div className="card">
-                    <table className="table w-full">
-                        <thead>
-                            <tr>
-                                <th>Symbol</th>
-                                <th>Side</th>
-                                <th>Entry</th>
-                                <th>Exit</th>
-                                <th>P&L</th>
-                                <th>Reason</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {closedPositions.map((pos) => (
-                                <tr key={pos.id}>
-                                    <td>{pos.symbol}</td>
-                                    <td>
-                                        <span className={`badge ${pos.side === 'LONG' ? 'badge-success' : 'badge-danger'}`}>
-                                            {pos.side}
-                                        </span>
-                                    </td>
-                                    <td>${pos.entryPrice.toLocaleString()}</td>
-                                    <td>${pos.exitPrice.toLocaleString()}</td>
-                                    <td className={pos.realizedPnL >= 0 ? 'text-[#4a9268]' : 'text-[#a65454]'}>
-                                        {pos.realizedPnL >= 0 ? '+' : ''}${pos.realizedPnL.toFixed(2)}
-                                    </td>
-                                    <td className="text-[#8b98a5]">{pos.exitReason}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+                    {/* Open Positions */}
+                    <div>
+                        <h2 className="text-xl font-semibold text-white mb-4">Open Positions</h2>
+                        {positions.length > 0 ? (
+                            <div className="space-y-4">
+                                {positions.map((position) => (
+                                    <PositionCard key={position.id} position={position} />
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-12 bg-[#1d2229] border border-[#2d3640] rounded-xl">
+                                <div className="text-5xl mb-4">📭</div>
+                                <div className="text-xl text-white mb-2">No Open Positions</div>
+                                <div className="text-gray-400">
+                                    The system has no active positions. This is a normal state.
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
-            {/* No Manual Close Notice */}
-            <div className="card bg-[#1a1f26] mt-6">
-                <div className="flex items-center gap-4 text-sm text-[#8b98a5]">
-                    <span className="text-xl">🔒</span>
-                    <span>
-                        Manual position closing is disabled to maintain trading discipline.
-                        All exits are handled by the system according to predefined rules.
-                    </span>
-                </div>
-            </div>
+                    {/* Closed Positions Today */}
+                    <div className="mt-8">
+                        <h2 className="text-xl font-semibold text-white mb-4">Closed Today</h2>
+                        {closedPositions.length > 0 ? (
+                            <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl overflow-hidden">
+                                <table className="w-full">
+                                    <thead className="bg-gray-800/50">
+                                        <tr className="text-left text-gray-400 text-sm">
+                                            <th className="p-4">Symbol</th>
+                                            <th className="p-4">Side</th>
+                                            <th className="p-4">Entry</th>
+                                            <th className="p-4">Exit</th>
+                                            <th className="p-4">P&L</th>
+                                            <th className="p-4">Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {closedPositions.map((pos) => (
+                                            <tr key={pos.id} className="border-t border-gray-700">
+                                                <td className="p-4 text-white">{pos.symbol}</td>
+                                                <td className="p-4">
+                                                    <span className={`px-2 py-0.5 rounded text-xs ${pos.side === 'LONG'
+                                                            ? 'bg-green-500/20 text-green-400'
+                                                            : 'bg-red-500/20 text-red-400'
+                                                        }`}>
+                                                        {pos.side}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 text-white">${pos.entryPrice.toLocaleString()}</td>
+                                                <td className="p-4 text-white">${pos.exitPrice.toLocaleString()}</td>
+                                                <td className={`p-4 ${pos.realizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                    {pos.realizedPnL >= 0 ? '+' : ''}${pos.realizedPnL.toFixed(2)}
+                                                </td>
+                                                <td className="p-4 text-gray-400">{pos.exitReason || '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="text-center py-8 bg-[#1d2229] border border-[#2d3640] rounded-xl">
+                                <div className="text-gray-400">No positions closed today</div>
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     );
 }

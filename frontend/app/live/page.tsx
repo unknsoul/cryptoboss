@@ -1,189 +1,189 @@
 'use client';
 
 /**
- * Live Status Page
+ * Live Status Page - CRYPTOBOSS vFINAL
  * 
- * Purpose: Real-time awareness without noise
- * Rules:
- * - No flashing prices
- * - No trade buttons
- * - Compact, informative display
+ * SIMPLIFIED: Direct REST polling for reliability
+ * Shows real prices from Binance
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
-function StatusRow({ label, value, subValue, variant = 'neutral' }: {
-    label: string;
-    value: string | number;
-    subValue?: string;
-    variant?: 'success' | 'warning' | 'danger' | 'neutral';
-}) {
-    const valueColors = {
-        success: 'text-[#4a9268]',
-        warning: 'text-[#c4a052]',
-        danger: 'text-[#a65454]',
-        neutral: 'text-[#e7e9ea]',
-    };
+const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'];
+const API_URL = 'http://localhost:8000/api/prices/live';
+const POLL_INTERVAL = 3000;
+
+interface Price {
+    symbol: string;
+    price: number;
+    change24h: number;
+    high24h?: number;
+    low24h?: number;
+    volume24h?: number;
+    timestamp: string;
+    source?: string;
+}
+
+interface Prices {
+    [key: string]: Price;
+}
+
+function PriceCard({ symbol, price }: { symbol: string; price: Price | null }) {
+    const hasPrice = price && price.price > 0;
+    const isPositive = (price?.change24h || 0) >= 0;
 
     return (
-        <div className="flex items-center justify-between py-3 border-b border-[#2d3640] last:border-0">
-            <span className="text-[#8b98a5] text-sm">{label}</span>
-            <div className="text-right">
-                <span className={`font-medium ${valueColors[variant]}`}>{value}</span>
-                {subValue && (
-                    <span className="text-[#6b7280] text-sm ml-2">{subValue}</span>
-                )}
+        <div className="bg-[#1d2229] border border-[#2d3640] rounded-xl p-6">
+            <div className="flex justify-between items-start mb-2">
+                <span className="text-lg font-semibold text-white">
+                    {symbol.replace('USDT', '/USDT')}
+                </span>
+                <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${hasPrice ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                        }`} />
+                    <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-400">
+                        LIVE
+                    </span>
+                </div>
+            </div>
+
+            {!hasPrice ? (
+                <div className="py-4">
+                    <div className="text-3xl font-mono text-gray-500">---.--</div>
+                    <div className="text-sm text-yellow-400 mt-1">Loading...</div>
+                </div>
+            ) : (
+                <>
+                    <div className="py-2">
+                        <span className="text-3xl font-mono text-white">
+                            ${price.price.toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: price.price < 100 ? 4 : 2
+                            })}
+                        </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 mt-2">
+                        <span className={`text-sm font-medium ${isPositive ? 'text-green-400' : 'text-red-400'
+                            }`}>
+                            {isPositive ? '+' : ''}{price.change24h?.toFixed(2) || '0.00'}%
+                        </span>
+
+                        {price.volume24h && (
+                            <span className="text-xs text-gray-400">
+                                Vol: ${(price.volume24h / 1000000).toFixed(1)}M
+                            </span>
+                        )}
+                    </div>
+
+                    {price.high24h && price.low24h && (
+                        <div className="flex justify-between text-xs text-gray-500 mt-3 pt-3 border-t border-gray-700">
+                            <span>H: ${price.high24h.toLocaleString()}</span>
+                            <span>L: ${price.low24h.toLocaleString()}</span>
+                        </div>
+                    )}
+                </>
+            )}
+
+            <div className="text-xs text-gray-600 mt-3">
+                {price?.timestamp ? new Date(price.timestamp).toLocaleTimeString() : '--:--:--'}
             </div>
         </div>
     );
 }
 
 export default function LiveStatusPage() {
-    // Client-only state to prevent hydration mismatch
-    const [mounted, setMounted] = useState(false);
-    const [lastUpdate, setLastUpdate] = useState('--:--:--');
+    const [prices, setPrices] = useState<Prices>({});
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
 
-    // Live data state (will be connected to API)
-    const [liveData, setLiveData] = useState({
-        price: { symbol: 'BTC/USDT', value: 0, change24h: 0 },
-        positions: { open: 0, totalExposure: 0, unrealizedPnL: 0 },
-        proposals: { active: 0, lastRejectedReason: 'None' },
-        execution: { state: 'IDLE', pendingOrders: 0, lastFillTime: '--:--:--' },
-    });
+    const fetchPrices = useCallback(async () => {
+        try {
+            const response = await fetch(API_URL);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
 
-    // Only run on client to prevent hydration mismatch
-    useEffect(() => {
-        setMounted(true);
+            const result = await response.json();
+            console.log('Price data:', result);
 
-        // Initial data load
-        setLiveData({
-            price: { symbol: 'BTC/USDT', value: 89168.42, change24h: 2.34 },
-            positions: { open: 2, totalExposure: 4500, unrealizedPnL: 156.80 },
-            proposals: { active: 0, lastRejectedReason: 'Trade budget exhausted' },
-            execution: { state: 'IDLE', pendingOrders: 0, lastFillTime: '14:32:15' },
-        });
-
-        const interval = setInterval(() => {
-            setLastUpdate(new Date().toLocaleTimeString('en-GB', { hour12: false }));
-        }, 5000);
-
-        // Set initial time
-        setLastUpdate(new Date().toLocaleTimeString('en-GB', { hour12: false }));
-
-        return () => clearInterval(interval);
+            if (result.data?.prices) {
+                setPrices(result.data.prices);
+                setLastUpdate(new Date().toLocaleTimeString('en-GB', { hour12: false }));
+                setError(null);
+            } else {
+                setError('No price data received');
+            }
+        } catch (e: any) {
+            console.error('Fetch error:', e);
+            setError(e.message || 'Failed to fetch prices');
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    const getPnLVariant = (pnl: number) => {
-        if (pnl > 0) return 'success';
-        if (pnl < 0) return 'danger';
-        return 'neutral';
-    };
+    useEffect(() => {
+        // Initial fetch
+        fetchPrices();
 
-    // Show loading state until mounted to prevent hydration mismatch
-    if (!mounted) {
-        return (
-            <div className="space-y-6">
-                <div className="mb-8">
-                    <h1 className="heading-lg mb-1">Live Status</h1>
-                    <p className="text-[#8b98a5] text-sm">Loading...</p>
-                </div>
-            </div>
-        );
-    }
+        // Poll every 3 seconds
+        const interval = setInterval(fetchPrices, POLL_INTERVAL);
+
+        return () => clearInterval(interval);
+    }, [fetchPrices]);
 
     return (
-        <div className="space-y-6">
-            {/* Page Header */}
+        <div className="p-6 space-y-6">
+            {/* Header */}
             <div className="mb-8">
-                <h1 className="heading-lg mb-1">Live Status</h1>
-                <p className="text-[#8b98a5] text-sm">
-                    Real-time awareness — last update: {lastUpdate}
-                </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Price Display - Compact, no flash */}
-                <div className="card">
-                    <div className="card-header">
-                        <span className="card-title">Current Price</span>
-                    </div>
-                    <div className="flex items-baseline gap-3">
-                        <span className="value-xl">${liveData.price.value.toLocaleString()}</span>
-                        <span className={`text-sm ${liveData.price.change24h >= 0 ? 'text-[#4a9268]' : 'text-[#a65454]'}`}>
-                            {liveData.price.change24h >= 0 ? '+' : ''}{liveData.price.change24h}%
-                        </span>
-                    </div>
-                    <div className="text-sm text-[#6b7280] mt-1">{liveData.price.symbol}</div>
-                </div>
-
-                {/* Execution State */}
-                <div className="card">
-                    <div className="card-header">
-                        <span className="card-title">Execution State</span>
-                    </div>
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className={`status-dot ${liveData.execution.state === 'IDLE' ? 'status-dot-neutral' :
-                                liveData.execution.state === 'EXECUTING' ? 'status-dot-warning' :
-                                    'status-dot-healthy'
-                            }`} />
-                        <span className="value-md">{liveData.execution.state}</span>
-                    </div>
-                    <StatusRow
-                        label="Pending Orders"
-                        value={liveData.execution.pendingOrders}
-                    />
-                    <StatusRow
-                        label="Last Fill"
-                        value={liveData.execution.lastFillTime}
-                    />
-                </div>
-
-                {/* Open Positions Summary */}
-                <div className="card">
-                    <div className="card-header">
-                        <span className="card-title">Open Positions</span>
-                    </div>
-                    <StatusRow
-                        label="Active Positions"
-                        value={liveData.positions.open}
-                    />
-                    <StatusRow
-                        label="Total Exposure"
-                        value={`$${liveData.positions.totalExposure.toLocaleString()}`}
-                    />
-                    <StatusRow
-                        label="Unrealized P&L"
-                        value={`${liveData.positions.unrealizedPnL >= 0 ? '+' : ''}$${liveData.positions.unrealizedPnL.toFixed(2)}`}
-                        variant={getPnLVariant(liveData.positions.unrealizedPnL)}
-                    />
-                </div>
-
-                {/* Active Proposals */}
-                <div className="card">
-                    <div className="card-header">
-                        <span className="card-title">Proposals</span>
-                    </div>
-                    <StatusRow
-                        label="Active Proposals"
-                        value={liveData.proposals.active}
-                    />
-                    <StatusRow
-                        label="Last Rejection"
-                        value={liveData.proposals.lastRejectedReason}
-                        variant="neutral"
-                    />
-                </div>
-            </div>
-
-            {/* No Trade Buttons Notice */}
-            <div className="card bg-[#1a1f26]">
-                <div className="flex items-center gap-4 text-sm text-[#8b98a5]">
-                    <span className="text-xl">ℹ️</span>
-                    <span>
-                        This is a monitoring view only. Manual trade execution is not available from the dashboard
-                        to maintain system discipline and auditability.
+                <div className="flex items-center gap-3 mb-1">
+                    <h1 className="text-3xl font-bold text-white">Live Prices</h1>
+                    <span className={`px-3 py-1 rounded text-sm font-medium ${error ? 'bg-red-500/20 text-red-400' :
+                            loading ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-green-500/20 text-green-400'
+                        }`}>
+                        {error ? 'ERROR' : loading ? 'LOADING' : 'CONNECTED'}
                     </span>
                 </div>
+                <p className="text-gray-400 text-sm">
+                    Real-time prices from Binance — Last update: {lastUpdate}
+                </p>
+                {error && (
+                    <p className="text-red-400 text-sm mt-2">Error: {error}</p>
+                )}
+            </div>
+
+            {/* Price Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {SYMBOLS.map(symbol => (
+                    <PriceCard
+                        key={symbol}
+                        symbol={symbol}
+                        price={prices[symbol] || null}
+                    />
+                ))}
+            </div>
+
+            {/* Info */}
+            <div className="mt-8 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                <div className="flex items-start gap-4 text-sm text-gray-400">
+                    <span className="text-xl">ℹ️</span>
+                    <div>
+                        <p className="mb-2">
+                            <strong className="text-white">Real prices from Binance.</strong> Updates every 3 seconds.
+                        </p>
+                        <p>
+                            Testnet trading uses mainnet prices (testnet has no real market data).
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Debug Info */}
+            <div className="mt-4 p-4 bg-gray-900 rounded-xl border border-gray-800 text-xs font-mono text-gray-500">
+                <div>Symbols: {Object.keys(prices).join(', ') || 'None'}</div>
+                <div>BTC: {prices['BTCUSDT']?.price || 'N/A'}</div>
             </div>
         </div>
     );
