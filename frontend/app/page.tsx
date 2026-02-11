@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { LivePricesGrid, PriceStatusBanner } from '@/components/LivePriceCard';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -257,6 +258,19 @@ export default function OverviewPage() {
                 <p className="text-[#8b98a5] text-sm">
                     High-level system health snapshot — understand status in 10 seconds
                 </p>
+            </div>
+
+            {/* LIVE PRICES SECTION - WebSocket driven */}
+            <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-4 h-4 text-[#4a9268]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                    </svg>
+                    <h2 className="text-sm font-medium text-[#4a9268] uppercase tracking-wider">Live Prices</h2>
+                    <span className="text-xs text-[#6b7280]">(WebSocket)</span>
+                </div>
+                <PriceStatusBanner className="mb-3" />
+                <LivePricesGrid />
             </div>
 
             {/* v10.2: Safety Metrics Section (BEFORE profit metrics) */}

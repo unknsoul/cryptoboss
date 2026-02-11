@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface Position {
     id: string;
     symbol: string;
@@ -22,7 +24,7 @@ export default function PositionsTable() {
         const fetchPositions = async () => {
             try {
                 // Use correct endpoint: /api/portfolio returns positions
-                const response = await fetch('/api/portfolio');
+                const response = await fetch(`${API_URL}/api/portfolio`);
                 const result = await response.json();
 
                 // Handle wrapped response format

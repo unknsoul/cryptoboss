@@ -164,7 +164,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
             if (!response.ok) {
                 const error = await response.json();
-                throw new Error(error.message || 'Failed to switch mode');
+                throw new Error(error.detail || error.message || 'Failed to switch mode');
             }
 
             const data = await response.json();

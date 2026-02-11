@@ -26,7 +26,7 @@ class EnvironmentConfig:
     log_level: str
     
     # Trading
-    trading_mode: str  # paper, live
+    trading_mode: str  # testnet, live (paper removed)
     max_position_size: float
     default_leverage: int
     
@@ -64,7 +64,7 @@ class ConfigManager:
         "log_level": "DEBUG",
         
         "trading": {
-            "mode": "paper",
+            "mode": "testnet",  # paper mode removed, use testnet for non-live
             "max_position_size_usd": 1000,
             "default_leverage": 1,
             "symbols": ["BTC/USDT", "ETH/USDT"],
@@ -111,14 +111,14 @@ class ConfigManager:
         "dev": {
             "debug": True,
             "log_level": "DEBUG",
-            "trading": {"mode": "paper"},
+            "trading": {"mode": "testnet"},  # paper removed, use testnet
             "exchange": {"use_testnet": True},
             "risk": {"max_daily_loss_pct": 10.0},
         },
         "staging": {
             "debug": True,
             "log_level": "INFO",
-            "trading": {"mode": "paper"},
+            "trading": {"mode": "testnet"},  # paper removed, use testnet
             "exchange": {"use_testnet": True},
             "risk": {"max_daily_loss_pct": 5.0},
         },

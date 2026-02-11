@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 import {
     LineChart,
     Line,
@@ -32,7 +34,7 @@ export default function PriceChart() {
         // Fetch price data from API
         const fetchPriceData = async () => {
             try {
-                const response = await fetch(`/api/prices?timeframe=${timeframe}`);
+                const response = await fetch(`${API_URL}/api/prices?timeframe=${timeframe}`);
                 const result = await response.json();
                 // Handle wrapped response format
                 const data = result.data || result;

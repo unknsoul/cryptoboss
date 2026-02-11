@@ -800,6 +800,246 @@ class BinanceClient:
         }
 
 
+# === MarketDataService ===
+
+class MarketDataService:
+    """
+    WebSocket-based live price streaming service.
+    
+    Provides real-time price updates with proper event emission for frontend consumption.
+    
+    Usage:
+        service = MarketDataService(exchange_account_id="acc-123", testnet=True)
+        await service.start()
+        service.subscribe("BTCUSDT", callback)
+        # ... later
+        service.unsubscribe("BTCUSDT", callback)
+        await service.stop()
+    
+    Events emitted to callbacks:
+        {
+            "exchange_account_id": "acc-123",
+            "symbol": "BTCUSDT",
+            "price": 45000.50,
+            "timestamp_ms": 1707161234567,
+            "source": "TESTNET" | "LIVE"
+        }
+    """
+    
+    def __init__(
+        self,
+        exchange_account_id: str,
+        testnet: bool = None,
+        poll_interval: float = 1.0
+    ):
+        """
+        Initialize MarketDataService.
+        
+        Args:
+            exchange_account_id: Account ID for scoping price events
+            testnet: True for testnet, False for live
+            poll_interval: Seconds between price polls (WebSocket fallback)
+        """
+        if testnet is None:
+            testnet = get_testnet_enabled()
+        
+        self.exchange_account_id = exchange_account_id
+        self.testnet = testnet
+        
+        # CRITICAL: Always use MAINNET for prices (read-only), testnet for trading
+        # Testnet does NOT have reliable market data
+        self.price_endpoints = BinanceEndpoints.live()  # MAINNET for prices
+        self.trading_endpoints = BinanceEndpoints.testnet() if testnet else BinanceEndpoints.live()
+        self.poll_interval = poll_interval
+        
+        # Subscriptions: {symbol: [callback1, callback2, ...]}
+        self._subscriptions: Dict[str, List[Callable]] = {}
+        
+        # Latest prices: {symbol: price}
+        self._prices: Dict[str, float] = {}
+        
+        # State
+        self._running = False
+        self._poll_task: Optional[asyncio.Task] = None
+        self._ws_connection = None
+        
+        # Source tag - MAINNET for prices always
+        self._source = "TESTNET" if testnet else "LIVE"  # Trading environment
+        self._price_source = "LIVE"  # Price source always mainnet
+        
+        env_name = "TESTNET" if testnet else "LIVE"
+        logger.info(f"MarketDataService initialized (trading: {env_name}, prices: MAINNET) for account {exchange_account_id}")
+    
+    async def start(self) -> bool:
+        """
+        Start the price streaming service.
+        
+        Returns:
+            True if started successfully
+        """
+        if self._running:
+            logger.warning("MarketDataService already running")
+            return True
+        
+        try:
+            self._running = True
+            
+            # Start price polling (WebSocket upgrade can be added later)
+            self._poll_task = asyncio.create_task(self._price_poll_loop())
+            
+            logger.info(f"MarketDataService started for account {self.exchange_account_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to start MarketDataService: {e}")
+            self._running = False
+            return False
+    
+    async def stop(self):
+        """Stop the price streaming service."""
+        self._running = False
+        
+        if self._poll_task:
+            self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+            self._poll_task = None
+        
+        if self._ws_connection:
+            await self._ws_connection.close()
+            self._ws_connection = None
+        
+        logger.info(f"MarketDataService stopped for account {self.exchange_account_id}")
+    
+    def subscribe(self, symbol: str, callback: Callable):
+        """
+        Subscribe to price updates for a symbol.
+        
+        Args:
+            symbol: Trading pair symbol (e.g. "BTCUSDT")
+            callback: Function to call with price events
+        """
+        symbol = symbol.upper()
+        
+        if symbol not in self._subscriptions:
+            self._subscriptions[symbol] = []
+        
+        if callback not in self._subscriptions[symbol]:
+            self._subscriptions[symbol].append(callback)
+            logger.info(f"Subscribed to {symbol} price updates")
+    
+    def unsubscribe(self, symbol: str, callback: Callable = None):
+        """
+        Unsubscribe from price updates.
+        
+        Args:
+            symbol: Trading pair symbol
+            callback: Specific callback to remove, or None to remove all
+        """
+        symbol = symbol.upper()
+        
+        if symbol not in self._subscriptions:
+            return
+        
+        if callback is None:
+            del self._subscriptions[symbol]
+            logger.info(f"Unsubscribed all callbacks from {symbol}")
+        elif callback in self._subscriptions[symbol]:
+            self._subscriptions[symbol].remove(callback)
+            if not self._subscriptions[symbol]:
+                del self._subscriptions[symbol]
+            logger.info(f"Unsubscribed callback from {symbol}")
+    
+    def get_price(self, symbol: str) -> Optional[float]:
+        """Get latest cached price for a symbol."""
+        return self._prices.get(symbol.upper())
+    
+    def get_all_prices(self) -> Dict[str, Dict]:
+        """
+        Get all cached prices with metadata.
+        
+        Returns:
+            Dict of {symbol: {price, timestamp_ms, source}}
+        """
+        import time
+        now_ms = int(time.time() * 1000)
+        
+        return {
+            symbol: {
+                "price": price,
+                "timestamp_ms": now_ms,
+                "source": self._source
+            }
+            for symbol, price in self._prices.items()
+        }
+    
+    async def _price_poll_loop(self):
+        """Internal price polling loop."""
+        import aiohttp
+        import time
+        
+        while self._running:
+            try:
+                # Get symbols to poll
+                symbols = list(self._subscriptions.keys())
+                
+                if not symbols:
+                    await asyncio.sleep(self.poll_interval)
+                    continue
+                
+                # Fetch prices from MAINNET Binance REST API (always mainnet for reliable prices)
+                async with aiohttp.ClientSession() as session:
+                    for symbol in symbols:
+                        try:
+                            # CRITICAL: Use price_endpoints (MAINNET) not trading_endpoints
+                            url = f"{self.price_endpoints.rest_base}/api/v3/ticker/price?symbol={symbol}"
+                            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    price = float(data.get("price", 0))
+                                    
+                                    if price > 0:
+                                        self._prices[symbol] = price
+                                        await self._emit_price_event(symbol, price)
+                                        
+                        except Exception as e:
+                            logger.debug(f"Failed to fetch price for {symbol}: {e}")
+                
+                await asyncio.sleep(self.poll_interval)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Price poll error: {e}")
+                await asyncio.sleep(5)
+    
+    async def _emit_price_event(self, symbol: str, price: float):
+        """Emit price event to all subscribers."""
+        import time
+        
+        if symbol not in self._subscriptions:
+            return
+        
+        event = {
+            "exchange_account_id": self.exchange_account_id,
+            "symbol": symbol,
+            "price": price,
+            "timestamp_ms": int(time.time() * 1000),
+            "source": self._source
+        }
+        
+        for callback in self._subscriptions[symbol]:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(event)
+                else:
+                    callback(event)
+            except Exception as e:
+                logger.error(f"Price callback error for {symbol}: {e}")
+
+
 # === Factory Functions ===
 
 def create_binance_client(

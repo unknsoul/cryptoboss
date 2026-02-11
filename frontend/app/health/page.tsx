@@ -3,44 +3,47 @@
 /**
  * Execution & Health Page
  * 
- * Purpose: Infrastructure reliability monitoring
- * Rules:
- * - Escalation stages clearly labeled
- * - Manual recovery actions visible
+ * CRYPTOBOSS 2.0: NO MOCK DATA
+ * - All data comes from backend API
+ * - Shows empty/waiting state when no data
+ * - Escalation stages are reference-only (always shown)
  */
 
-// Mock execution health data
-const healthData = {
+import { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Escalation stage definitions (static reference, not mock data)
+const ESCALATION_STAGES = [
+    { level: 0, name: 'NORMAL', description: 'All systems operational', color: 'success' },
+    { level: 1, name: 'DEGRADED', description: 'Increased latency or minor issues', color: 'warning' },
+    { level: 2, name: 'CLOSE_ONLY', description: 'New entries blocked, exits only', color: 'warning' },
+    { level: 3, name: 'HALTED', description: 'All trading suspended', color: 'danger' },
+];
+
+interface HealthData {
     exchange: {
-        latency: 45,
-        latencyHistory: [42, 48, 45, 52, 41, 45],
-        status: 'NORMAL' as const,
-    },
+        latency: number | null;
+        status: string;
+    };
     orders: {
-        rejectionRate: 0.8,
-        partialFillRatio: 2.1,
-        avgFillTime: 120,
-    },
-    escalation: {
-        currentStage: 0,
-        stages: [
-            { level: 0, name: 'NORMAL', description: 'All systems operational', color: 'success' },
-            { level: 1, name: 'DEGRADED', description: 'Increased latency or minor issues', color: 'warning' },
-            { level: 2, name: 'CLOSE_ONLY', description: 'New entries blocked, exits only', color: 'warning' },
-            { level: 3, name: 'HALTED', description: 'All trading suspended', color: 'danger' },
-        ],
-    },
-    recentEvents: [
-        { time: '14:32:15', event: 'Order filled', details: 'BTC/USDT LONG 0.025 @ 89168.42', type: 'success' },
-        { time: '14:28:00', event: 'Latency spike', details: '156ms (above 100ms threshold)', type: 'warning' },
-        { time: '14:15:00', event: 'Connection restored', details: 'Binance WebSocket reconnected', type: 'success' },
-        { time: '14:14:30', event: 'Connection lost', details: 'WebSocket disconnected', type: 'danger' },
-    ],
-};
+        rejectionRate: number | null;
+        partialFillRatio: number | null;
+        avgFillTime: number | null;
+    };
+    currentStage: number;
+    recentEvents: Array<{
+        time: string;
+        event: string;
+        details: string;
+        type: 'success' | 'warning' | 'danger';
+    }>;
+}
 
 function HealthMetric({ label, value, unit, status }: {
     label: string;
-    value: string | number;
+    value: string | number | null;
     unit?: string;
     status?: 'good' | 'warning' | 'bad';
 }) {
@@ -54,14 +57,67 @@ function HealthMetric({ label, value, unit, status }: {
         <div className="bg-[#1a1f26] rounded-md p-4 text-center">
             <span className="label block">{label}</span>
             <span className={`value-lg block mt-1 ${status ? statusColors[status] : 'text-[#e7e9ea]'}`}>
-                {value}{unit && <span className="text-sm text-[#8b98a5] ml-1">{unit}</span>}
+                {value !== null && value !== undefined ? (
+                    <>{value}{unit && <span className="text-sm text-[#8b98a5] ml-1">{unit}</span>}</>
+                ) : (
+                    <span className="text-[#6b7280]">--</span>
+                )}
             </span>
         </div>
     );
 }
 
 export default function ExecutionHealthPage() {
-    const currentStage = healthData.escalation.stages[healthData.escalation.currentStage];
+    const { activeAccount, token } = useAuth();
+    const [healthData, setHealthData] = useState<HealthData | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    // Fetch health data from backend
+    useEffect(() => {
+        if (!activeAccount || !token) {
+            setHealthData(null);
+            return;
+        }
+
+        const fetchHealth = async () => {
+            setLoading(true);
+            try {
+                const res = await fetch(
+                    `${API_URL}/api/v11/risk/state`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (res.ok) {
+                    const data = await res.json();
+                    // Map backend response to HealthData shape
+                    setHealthData({
+                        exchange: {
+                            latency: data.latency_ms ?? null,
+                            status: data.exchange_status ?? 'UNKNOWN',
+                        },
+                        orders: {
+                            rejectionRate: data.rejection_rate ?? null,
+                            partialFillRatio: data.partial_fill_ratio ?? null,
+                            avgFillTime: data.avg_fill_time_ms ?? null,
+                        },
+                        currentStage: data.escalation_level ?? 0,
+                        recentEvents: data.recent_events ?? [],
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to fetch health data:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchHealth();
+        const interval = setInterval(fetchHealth, 10000); // Poll every 10s
+        return () => clearInterval(interval);
+    }, [activeAccount?.exchange_account_id, token]);
+
+    // Determine current stage
+    const currentStageIdx = healthData?.currentStage ?? 0;
+    const currentStage = ESCALATION_STAGES[currentStageIdx] ?? ESCALATION_STAGES[0];
 
     return (
         <div className="space-y-6">
@@ -75,7 +131,7 @@ export default function ExecutionHealthPage() {
 
             {/* Current Escalation Stage */}
             <div className={`card border-l-4 ${currentStage.color === 'success' ? 'border-l-[#4a9268]' :
-                    currentStage.color === 'warning' ? 'border-l-[#c4a052]' : 'border-l-[#a65454]'
+                currentStage.color === 'warning' ? 'border-l-[#c4a052]' : 'border-l-[#a65454]'
                 }`}>
                 <div className="flex items-center justify-between">
                     <div>
@@ -88,13 +144,13 @@ export default function ExecutionHealthPage() {
                         </div>
                     </div>
                     <div className="flex gap-2">
-                        {healthData.escalation.stages.map((stage, idx) => (
+                        {ESCALATION_STAGES.map((stage, idx) => (
                             <div
                                 key={stage.level}
-                                className={`w-3 h-3 rounded-full ${idx === healthData.escalation.currentStage
-                                        ? stage.color === 'success' ? 'bg-[#4a9268]' :
-                                            stage.color === 'warning' ? 'bg-[#c4a052]' : 'bg-[#a65454]'
-                                        : 'bg-[#2d3640]'
+                                className={`w-3 h-3 rounded-full ${idx === currentStageIdx
+                                    ? stage.color === 'success' ? 'bg-[#4a9268]' :
+                                        stage.color === 'warning' ? 'bg-[#c4a052]' : 'bg-[#a65454]'
+                                    : 'bg-[#2d3640]'
                                     }`}
                                 title={stage.name}
                             />
@@ -103,35 +159,43 @@ export default function ExecutionHealthPage() {
                 </div>
             </div>
 
-            {/* Key Metrics */}
+            {/* Key Metrics - Shows "--" when no data */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <HealthMetric
                     label="Latency"
-                    value={healthData.exchange.latency}
+                    value={healthData?.exchange.latency ?? null}
                     unit="ms"
-                    status={healthData.exchange.latency < 100 ? 'good' :
-                        healthData.exchange.latency < 300 ? 'warning' : 'bad'}
+                    status={healthData?.exchange.latency != null
+                        ? (healthData.exchange.latency < 100 ? 'good' :
+                            healthData.exchange.latency < 300 ? 'warning' : 'bad')
+                        : undefined}
                 />
                 <HealthMetric
                     label="Order Rejection Rate"
-                    value={healthData.orders.rejectionRate}
+                    value={healthData?.orders.rejectionRate ?? null}
                     unit="%"
-                    status={healthData.orders.rejectionRate < 2 ? 'good' :
-                        healthData.orders.rejectionRate < 5 ? 'warning' : 'bad'}
+                    status={healthData?.orders.rejectionRate != null
+                        ? (healthData.orders.rejectionRate < 2 ? 'good' :
+                            healthData.orders.rejectionRate < 5 ? 'warning' : 'bad')
+                        : undefined}
                 />
                 <HealthMetric
                     label="Partial Fill Ratio"
-                    value={healthData.orders.partialFillRatio}
+                    value={healthData?.orders.partialFillRatio ?? null}
                     unit="%"
-                    status={healthData.orders.partialFillRatio < 5 ? 'good' :
-                        healthData.orders.partialFillRatio < 10 ? 'warning' : 'bad'}
+                    status={healthData?.orders.partialFillRatio != null
+                        ? (healthData.orders.partialFillRatio < 5 ? 'good' :
+                            healthData.orders.partialFillRatio < 10 ? 'warning' : 'bad')
+                        : undefined}
                 />
                 <HealthMetric
                     label="Avg Fill Time"
-                    value={healthData.orders.avgFillTime}
+                    value={healthData?.orders.avgFillTime ?? null}
                     unit="ms"
-                    status={healthData.orders.avgFillTime < 200 ? 'good' :
-                        healthData.orders.avgFillTime < 500 ? 'warning' : 'bad'}
+                    status={healthData?.orders.avgFillTime != null
+                        ? (healthData.orders.avgFillTime < 200 ? 'good' :
+                            healthData.orders.avgFillTime < 500 ? 'warning' : 'bad')
+                        : undefined}
                 />
             </div>
 
@@ -142,12 +206,12 @@ export default function ExecutionHealthPage() {
                 </div>
 
                 <div className="space-y-3">
-                    {healthData.escalation.stages.map((stage) => (
+                    {ESCALATION_STAGES.map((stage) => (
                         <div
                             key={stage.level}
-                            className={`flex items-center justify-between p-3 rounded-md ${stage.level === healthData.escalation.currentStage
-                                    ? 'bg-[#1a1f26] border border-[#2d3640]'
-                                    : ''
+                            className={`flex items-center justify-between p-3 rounded-md ${stage.level === currentStageIdx
+                                ? 'bg-[#1a1f26] border border-[#2d3640]'
+                                : ''
                                 }`}
                         >
                             <div className="flex items-center gap-4">
@@ -155,7 +219,7 @@ export default function ExecutionHealthPage() {
                                 <span className={`badge badge-${stage.color}`}>{stage.name}</span>
                                 <span className="text-[#8b98a5] text-sm">{stage.description}</span>
                             </div>
-                            {stage.level === healthData.escalation.currentStage && (
+                            {stage.level === currentStageIdx && (
                                 <span className="badge badge-neutral">CURRENT</span>
                             )}
                         </div>
@@ -169,21 +233,27 @@ export default function ExecutionHealthPage() {
                     <span className="card-title">Recent Events</span>
                 </div>
 
-                <div className="space-y-2">
-                    {healthData.recentEvents.map((event, idx) => (
-                        <div
-                            key={idx}
-                            className="flex items-center gap-4 py-2 border-b border-[#2d3640] last:border-0"
-                        >
-                            <span className="text-xs font-mono text-[#6b7280] w-20">{event.time}</span>
-                            <div className={`status-dot ${event.type === 'success' ? 'status-dot-healthy' :
+                {(!healthData || healthData.recentEvents.length === 0) ? (
+                    <div className="text-center py-8 text-[#6b7280]">
+                        No recent events
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {healthData.recentEvents.map((event, idx) => (
+                            <div
+                                key={idx}
+                                className="flex items-center gap-4 py-2 border-b border-[#2d3640] last:border-0"
+                            >
+                                <span className="text-xs font-mono text-[#6b7280] w-20">{event.time}</span>
+                                <div className={`status-dot ${event.type === 'success' ? 'status-dot-healthy' :
                                     event.type === 'warning' ? 'status-dot-warning' : 'status-dot-critical'
-                                }`} />
-                            <span className="text-[#e7e9ea] text-sm">{event.event}</span>
-                            <span className="text-[#8b98a5] text-sm">{event.details}</span>
-                        </div>
-                    ))}
-                </div>
+                                    }`} />
+                                <span className="text-[#e7e9ea] text-sm">{event.event}</span>
+                                <span className="text-[#8b98a5] text-sm">{event.details}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -41,7 +41,7 @@ class EngineStatus(Enum):
 @dataclass
 class EngineConfig:
     """Engine configuration."""
-    mode: str = "paper"  # "live", "paper", "backtest"
+    mode: str = "testnet"  # "live", "testnet" (paper removed)
     portfolio_value: float = 10000.0
     auto_recover: bool = True  # Recover strategies on restart
     heartbeat_interval: int = 60  # Seconds
@@ -59,7 +59,7 @@ class TradingEngine:
         from src.core.engine import TradingEngine
         from src.strategies.dca_strategy import DCAStrategy
         
-        engine = TradingEngine(mode="paper", portfolio_value=10000)
+        engine = TradingEngine(mode="testnet", portfolio_value=10000)
         
         dca = DCAStrategy(
             base_order_size=100,
@@ -73,7 +73,7 @@ class TradingEngine:
     
     def __init__(
         self,
-        mode: str = "paper",
+        mode: str = "testnet",
         portfolio_value: float = 10000.0,
         exchange_client = None,
         config: EngineConfig = None
@@ -416,7 +416,7 @@ class TradingEngine:
 
 # Factory function for easy instantiation
 def create_engine(
-    mode: str = "paper",
+    mode: str = "testnet",
     portfolio_value: float = 10000.0,
     exchange_client = None
 ) -> TradingEngine:

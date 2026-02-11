@@ -1,5 +1,8 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+
 /**
  * Decision Flow Page
  * 
@@ -8,83 +11,19 @@
  * - Readable text explanations
  * - Chronological order
  * - No raw logs by default
+ * - NO MOCK DATA - fetch from backend
  */
 
-// Mock decision data
-const decisions = [
-    {
-        id: 1,
-        timestamp: '14:32:15',
-        type: 'PROPOSAL_REJECTED',
-        summary: 'Long entry proposal rejected',
-        details: [
-            { label: 'Reason', value: 'Trade budget exhausted for current context' },
-            { label: 'Context', value: 'RANGING' },
-            { label: 'Trades Used', value: '3/3' },
-        ],
-        variant: 'warning' as const,
-    },
-    {
-        id: 2,
-        timestamp: '14:28:42',
-        type: 'CONTEXT_CHANGE',
-        summary: 'Market context changed to RANGING',
-        details: [
-            { label: 'Previous', value: 'TRENDING_UP' },
-            { label: 'Confidence', value: '78%' },
-            { label: 'Cooldown', value: '15 minutes applied' },
-        ],
-        variant: 'neutral' as const,
-    },
-    {
-        id: 3,
-        timestamp: '14:15:00',
-        type: 'TRADE_EXECUTED',
-        summary: 'Short exit executed successfully',
-        details: [
-            { label: 'Symbol', value: 'BTC/USDT' },
-            { label: 'P&L', value: '+$42.50 (0.85%)' },
-            { label: 'Reason', value: 'Target profit reached' },
-        ],
-        variant: 'success' as const,
-    },
-    {
-        id: 4,
-        timestamp: '13:45:22',
-        type: 'PROPOSAL_REJECTED',
-        summary: 'Entry blocked by risk guardian',
-        details: [
-            { label: 'Reason', value: 'Daily loss limit approaching (85% used)' },
-            { label: 'Limit', value: '-$425 / -$500' },
-            { label: 'Action', value: 'Trade suspended until reset' },
-        ],
-        variant: 'danger' as const,
-    },
-    {
-        id: 5,
-        timestamp: '13:30:00',
-        type: 'NO_ACTION',
-        summary: 'No trade signal generated',
-        details: [
-            { label: 'Reason', value: 'Bias conviction below threshold' },
-            { label: 'Required', value: '65%' },
-            { label: 'Current', value: '52%' },
-        ],
-        variant: 'neutral' as const,
-    },
-    {
-        id: 6,
-        timestamp: '12:55:18',
-        type: 'BIAS_CHANGE',
-        summary: 'Bias shifted to LONG_BIAS',
-        details: [
-            { label: 'Previous', value: 'NEUTRAL' },
-            { label: 'Conviction', value: '68%' },
-            { label: 'Signal', value: 'Higher lows on 4H' },
-        ],
-        variant: 'neutral' as const,
-    },
-];
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+interface Decision {
+    id: string;
+    timestamp: string;
+    type: string;
+    summary: string;
+    details: Array<{ label: string; value: string }>;
+    variant: 'success' | 'warning' | 'danger' | 'neutral';
+}
 
 const decisionTypeLabels: Record<string, { text: string; icon: string }> = {
     'TRADE_EXECUTED': { text: 'Trade', icon: '✓' },
@@ -92,9 +31,38 @@ const decisionTypeLabels: Record<string, { text: string; icon: string }> = {
     'CONTEXT_CHANGE': { text: 'Context', icon: '↻' },
     'BIAS_CHANGE': { text: 'Bias', icon: '↔' },
     'NO_ACTION': { text: 'No Action', icon: '—' },
+    'ENTRY': { text: 'Entry', icon: '▶' },
+    'EXIT': { text: 'Exit', icon: '■' },
 };
 
-function DecisionCard({ decision }: { decision: typeof decisions[0] }) {
+function getVariantFromDecision(decision: any): 'success' | 'warning' | 'danger' | 'neutral' {
+    if (decision.status === 'executed' || decision.type === 'TRADE_EXECUTED') return 'success';
+    if (decision.status === 'rejected') return 'warning';
+    if (decision.status === 'cancelled' || decision.type === 'PROPOSAL_REJECTED') return 'danger';
+    return 'neutral';
+}
+
+function formatDecisionForDisplay(raw: any): Decision {
+    const timestamp = new Date(raw.timestamp || raw.created_at || Date.now())
+        .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    return {
+        id: raw.decision_id || raw.id || String(Date.now()),
+        timestamp,
+        type: raw.decision_type || raw.type || 'NO_ACTION',
+        summary: raw.narrative || raw.summary || raw.reason || 'Decision recorded',
+        details: [
+            ...(raw.symbol ? [{ label: 'Symbol', value: raw.symbol }] : []),
+            ...(raw.side ? [{ label: 'Side', value: raw.side }] : []),
+            ...(raw.context ? [{ label: 'Context', value: raw.context }] : []),
+            ...(raw.reason ? [{ label: 'Reason', value: raw.reason }] : []),
+        ],
+        variant: getVariantFromDecision(raw)
+    };
+}
+
+
+function DecisionCard({ decision }: { decision: Decision }) {
     const typeInfo = decisionTypeLabels[decision.type] || { text: decision.type, icon: '•' };
 
     const variantClasses = {
@@ -137,6 +105,54 @@ function DecisionCard({ decision }: { decision: typeof decisions[0] }) {
 }
 
 export default function DecisionFlowPage() {
+    const { activeAccount, token } = useAuth();
+    const [decisions, setDecisions] = useState<Decision[]>([]);
+    const [stats, setStats] = useState({ total: 0, executed: 0, rejected: 0, noAction: 0 });
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchDecisions = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/v11/decisions?limit=50`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch decisions');
+            }
+
+            const data = await response.json();
+            const formatted = (Array.isArray(data) ? data : []).map(formatDecisionForDisplay);
+
+            setDecisions(formatted);
+            setStats({
+                total: formatted.length,
+                executed: formatted.filter(d => d.type === 'TRADE_EXECUTED' || d.variant === 'success').length,
+                rejected: formatted.filter(d => d.type === 'PROPOSAL_REJECTED' || d.variant === 'danger').length,
+                noAction: formatted.filter(d => d.type === 'NO_ACTION').length,
+            });
+            setError(null);
+        } catch (e: any) {
+            console.error('Decisions fetch error:', e);
+            setError(e.message);
+            // Empty state on error - no mock data
+            setDecisions([]);
+        } finally {
+            setLoading(false);
+        }
+    }, [token]);
+
+    useEffect(() => {
+        setLoading(true);
+        fetchDecisions();
+    }, [activeAccount, fetchDecisions]);
+
+    // Refresh every 10 seconds
+    useEffect(() => {
+        const interval = setInterval(fetchDecisions, 10000);
+        return () => clearInterval(interval);
+    }, [fetchDecisions]);
+
     return (
         <div className="space-y-6">
             {/* Page Header */}
@@ -147,25 +163,39 @@ export default function DecisionFlowPage() {
                 </p>
             </div>
 
+            {/* Loading State */}
+            {loading && (
+                <div className="text-center py-12 text-[#8b98a5]">Loading decisions...</div>
+            )}
+
+            {/* Error State */}
+            {error && (
+                <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-4 text-red-400">
+                    Error: {error}
+                </div>
+            )}
+
             {/* Summary Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="card text-center">
-                    <span className="label">Today's Decisions</span>
-                    <span className="value-lg block mt-1">24</span>
+            {!loading && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="card text-center">
+                        <span className="label">Today's Decisions</span>
+                        <span className="value-lg block mt-1">{stats.total}</span>
+                    </div>
+                    <div className="card text-center">
+                        <span className="label">Trades Executed</span>
+                        <span className="value-lg block mt-1 text-[#4a9268]">{stats.executed}</span>
+                    </div>
+                    <div className="card text-center">
+                        <span className="label">Proposals Rejected</span>
+                        <span className="value-lg block mt-1 text-[#c4a052]">{stats.rejected}</span>
+                    </div>
+                    <div className="card text-center">
+                        <span className="label">No Action (Normal)</span>
+                        <span className="value-lg block mt-1 text-[#6b7280]">{stats.noAction}</span>
+                    </div>
                 </div>
-                <div className="card text-center">
-                    <span className="label">Trades Executed</span>
-                    <span className="value-lg block mt-1 text-[#4a9268]">3</span>
-                </div>
-                <div className="card text-center">
-                    <span className="label">Proposals Rejected</span>
-                    <span className="value-lg block mt-1 text-[#c4a052]">8</span>
-                </div>
-                <div className="card text-center">
-                    <span className="label">No Action (Normal)</span>
-                    <span className="value-lg block mt-1 text-[#6b7280]">13</span>
-                </div>
-            </div>
+            )}
 
             {/* Filter bar */}
             <div className="flex items-center gap-2 mb-6">
@@ -177,18 +207,33 @@ export default function DecisionFlowPage() {
             </div>
 
             {/* Decision Timeline */}
-            <div className="space-y-4">
-                {decisions.map((decision) => (
-                    <DecisionCard key={decision.id} decision={decision} />
-                ))}
-            </div>
+            {!loading && decisions.length > 0 && (
+                <div className="space-y-4">
+                    {decisions.map((decision) => (
+                        <DecisionCard key={decision.id} decision={decision} />
+                    ))}
+                </div>
+            )}
+
+            {/* Empty State */}
+            {!loading && decisions.length === 0 && (
+                <div className="text-center py-12 bg-[#1d2229] border border-[#2d3640] rounded-xl">
+                    <div className="text-5xl mb-4">📋</div>
+                    <div className="text-xl text-white mb-2">No Decisions Yet</div>
+                    <div className="text-gray-400">
+                        Decision records will appear here once the system processes market data.
+                    </div>
+                </div>
+            )}
 
             {/* Load More */}
-            <div className="text-center mt-8">
-                <button className="btn btn-ghost">
-                    Load Earlier Decisions
-                </button>
-            </div>
+            {decisions.length > 0 && (
+                <div className="text-center mt-8">
+                    <button className="btn btn-ghost">
+                        Load Earlier Decisions
+                    </button>
+                </div>
+            )}
 
             {/* Explainer Banner */}
             <div className="card mt-8 bg-[#1a1f26]">

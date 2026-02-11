@@ -3,185 +3,286 @@
 /**
  * Market Context Page
  * 
- * Purpose: Market regime understanding
- * Rules:
- * - Timeline view
- * - No technical indicator clutter
+ * CRYPTOBOSS 2.0: NO MOCK DATA
+ * - All data comes from backend API
+ * - Shows empty/waiting state when no data
+ * - Timeline view of market regimes
  */
 
-// Mock context data
-const contextData = {
-    current: {
-        state: 'RANGING',
-        confidence: 78,
-        timeInState: '2h 34m',
-        tradingAllowed: true,
-    },
-    cooldown: {
-        active: false,
-        remaining: '0m',
-        reason: null,
-    },
-    history: [
-        {
-            state: 'RANGING',
-            startTime: '12:00',
-            duration: '2h 34m',
-            active: true,
-            transitionReason: 'Volatility decreased below threshold'
-        },
-        {
-            state: 'TRENDING_UP',
-            startTime: '09:30',
-            duration: '2h 30m',
-            active: false,
-            transitionReason: 'Higher highs confirmed on 1H'
-        },
-        {
-            state: 'HIGH_VOLATILITY',
-            startTime: '08:45',
-            duration: '45m',
-            active: false,
-            transitionReason: 'News event volatility spike'
-        },
-        {
-            state: 'TRENDING_UP',
-            startTime: '06:00',
-            duration: '2h 45m',
-            active: false,
-            transitionReason: 'Session open momentum'
-        },
-    ],
-};
+import { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const stateColors: Record<string, string> = {
     'TRENDING_UP': 'badge-success',
     'TRENDING_DOWN': 'badge-danger',
     'RANGING': 'badge-accent',
     'HIGH_VOLATILITY': 'badge-warning',
-    'NO_TRADE': 'badge-neutral',
+    'LOW_VOLATILITY': 'badge-neutral',
 };
 
+const stateIcons: Record<string, string> = {
+    'TRENDING_UP': '📈',
+    'TRENDING_DOWN': '📉',
+    'RANGING': '↔️',
+    'HIGH_VOLATILITY': '⚡',
+    'LOW_VOLATILITY': '😴',
+};
+
+interface ContextData {
+    current: {
+        state: string;
+        confidence: number;
+        timeInState: string;
+        tradingAllowed: boolean;
+    };
+    cooldown: {
+        active: boolean;
+        remaining: string;
+        reason: string | null;
+    };
+    history: Array<{
+        state: string;
+        startTime: string;
+        duration: string;
+        active: boolean;
+        transitionReason: string;
+    }>;
+}
+
 export default function MarketContextPage() {
+    const { activeAccount, token } = useAuth();
+    const [contextData, setContextData] = useState<ContextData | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    // Fetch context data from backend
+    useEffect(() => {
+        if (!activeAccount || !token) {
+            setContextData(null);
+            return;
+        }
+
+        const fetchContext = async () => {
+            setLoading(true);
+            try {
+                const res = await fetch(
+                    `${API_URL}/api/v11/risk/state`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (res.ok) {
+                    const data = await res.json();
+                    // Only set if data has context info
+                    if (data.market_context || data.regime) {
+                        setContextData({
+                            current: {
+                                state: data.market_context?.state ?? data.regime ?? 'UNKNOWN',
+                                confidence: data.market_context?.confidence ?? 0,
+                                timeInState: data.market_context?.time_in_state ?? '--',
+                                tradingAllowed: data.market_context?.trading_allowed ?? false,
+                            },
+                            cooldown: {
+                                active: data.cooldown?.active ?? false,
+                                remaining: data.cooldown?.remaining ?? '0m',
+                                reason: data.cooldown?.reason ?? null,
+                            },
+                            history: data.market_context?.history ?? [],
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to fetch context:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchContext();
+        const interval = setInterval(fetchContext, 5000);
+        return () => clearInterval(interval);
+    }, [activeAccount?.exchange_account_id, token]);
+
+    // Show empty state when no data
+    if (!contextData) {
+        return (
+            <div className="space-y-6">
+                <div className="mb-8">
+                    <h1 className="heading-lg mb-1">Market Context</h1>
+                    <p className="text-[#8b98a5] text-sm">
+                        Market regime understanding — timeline view
+                    </p>
+                </div>
+
+                {/* Empty current state */}
+                <div className="card border-l-4 border-l-[#6b7280]">
+                    <div>
+                        <span className="label">Current Regime</span>
+                        <div className="flex items-center gap-3 mt-2">
+                            <span className="badge badge-neutral">WAITING</span>
+                            <span className="text-[#6b7280]">
+                                {activeAccount
+                                    ? 'Waiting for market data...'
+                                    : 'Select an exchange account to view market context'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Empty metrics */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                        <span className="label block">Confidence</span>
+                        <span className="value-lg block mt-1 text-[#6b7280]">--</span>
+                    </div>
+                    <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                        <span className="label block">Time in State</span>
+                        <span className="value-lg block mt-1 text-[#6b7280]">--</span>
+                    </div>
+                    <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                        <span className="label block">Trading</span>
+                        <span className="value-lg block mt-1 text-[#6b7280]">--</span>
+                    </div>
+                    <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                        <span className="label block">Cooldown</span>
+                        <span className="value-lg block mt-1 text-[#6b7280]">--</span>
+                    </div>
+                </div>
+
+                {/* Empty timeline */}
+                <div className="card">
+                    <div className="card-header">
+                        <span className="card-title">Regime Timeline</span>
+                    </div>
+                    <div className="text-center py-8 text-[#6b7280]">
+                        No regime history available
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Main view with data
+    const currentIcon = stateIcons[contextData.current.state] || '❓';
+    const currentColor = stateColors[contextData.current.state] || 'badge-neutral';
+
     return (
         <div className="space-y-6">
             {/* Page Header */}
             <div className="mb-8">
                 <h1 className="heading-lg mb-1">Market Context</h1>
                 <p className="text-[#8b98a5] text-sm">
-                    Market regime understanding — no indicator clutter
+                    Market regime understanding — timeline view
                 </p>
             </div>
 
-            {/* Current State Card */}
-            <div className="card">
-                <div className="card-header">
-                    <span className="card-title">Current State</span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="text-center">
-                        <span className="label block mb-2">Regime</span>
-                        <span className={`badge ${stateColors[contextData.current.state]} text-lg px-4 py-2`}>
-                            {contextData.current.state}
-                        </span>
-                    </div>
-                    <div className="text-center">
-                        <span className="label block mb-2">Confidence</span>
-                        <span className="value-xl">{contextData.current.confidence}%</span>
-                    </div>
-                    <div className="text-center">
-                        <span className="label block mb-2">Time in State</span>
-                        <span className="value-lg">{contextData.current.timeInState}</span>
-                    </div>
-                    <div className="text-center">
-                        <span className="label block mb-2">Trading</span>
-                        <span className={`badge ${contextData.current.tradingAllowed ? 'badge-success' : 'badge-danger'}`}>
-                            {contextData.current.tradingAllowed ? 'ALLOWED' : 'BLOCKED'}
-                        </span>
-                    </div>
-                </div>
-
-                {/* Cooldown Timer */}
-                {contextData.cooldown.active && (
-                    <div className="mt-6 p-4 bg-[#c4a052]/10 rounded-md">
-                        <div className="flex items-center gap-3">
-                            <span className="text-[#c4a052]">⏱</span>
-                            <div>
-                                <span className="text-[#c4a052] font-medium">
-                                    Transition Cooldown Active: {contextData.cooldown.remaining} remaining
-                                </span>
-                                <p className="text-sm text-[#8b98a5] mt-1">
-                                    {contextData.cooldown.reason}
-                                </p>
-                            </div>
+            {/* Current Regime */}
+            <div className={`card border-l-4 ${contextData.current.tradingAllowed ? 'border-l-[#4a9268]' : 'border-l-[#c4a052]'
+                }`}>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <span className="label">Current Regime</span>
+                        <div className="flex items-center gap-3 mt-2">
+                            <span className="text-2xl">{currentIcon}</span>
+                            <span className={`badge ${currentColor}`}>
+                                {contextData.current.state}
+                            </span>
+                            <span className="text-[#e7e9ea]">
+                                for {contextData.current.timeInState}
+                            </span>
                         </div>
                     </div>
-                )}
+                    <div className="text-right">
+                        <span className={`badge ${contextData.current.tradingAllowed ? 'badge-success' : 'badge-warning'}`}>
+                            {contextData.current.tradingAllowed ? 'Trading Allowed' : 'Trading Paused'}
+                        </span>
+                    </div>
+                </div>
             </div>
 
-            {/* Context History Timeline */}
-            <div className="card">
-                <div className="card-header">
-                    <span className="card-title">Context History (Today)</span>
+            {/* Key Metrics */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                    <span className="label block">Confidence</span>
+                    <span className="value-lg block mt-1 text-[#e7e9ea]">
+                        {contextData.current.confidence}%
+                    </span>
                 </div>
+                <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                    <span className="label block">Time in State</span>
+                    <span className="value-lg block mt-1 text-[#e7e9ea]">
+                        {contextData.current.timeInState}
+                    </span>
+                </div>
+                <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                    <span className="label block">Trading</span>
+                    <span className={`value-lg block mt-1 ${contextData.current.tradingAllowed ? 'text-[#4a9268]' : 'text-[#c4a052]'}`}>
+                        {contextData.current.tradingAllowed ? 'OPEN' : 'PAUSED'}
+                    </span>
+                </div>
+                <div className="bg-[#1a1f26] rounded-md p-4 text-center">
+                    <span className="label block">Cooldown</span>
+                    <span className={`value-lg block mt-1 ${contextData.cooldown.active ? 'text-[#c4a052]' : 'text-[#4a9268]'}`}>
+                        {contextData.cooldown.active ? contextData.cooldown.remaining : 'None'}
+                    </span>
+                </div>
+            </div>
 
-                <div className="timeline">
-                    {contextData.history.map((item, idx) => (
-                        <div
-                            key={idx}
-                            className={`timeline-item ${item.active ? 'timeline-item-success' : ''}`}
-                        >
-                            <div className="flex items-start justify-between mb-2">
-                                <div className="flex items-center gap-3">
-                                    <span className="text-xs font-mono text-[#6b7280]">{item.startTime}</span>
-                                    <span className={`badge ${stateColors[item.state]}`}>{item.state}</span>
-                                    {item.active && (
-                                        <span className="badge badge-success">CURRENT</span>
-                                    )}
-                                </div>
-                                <span className="text-sm text-[#8b98a5]">{item.duration}</span>
-                            </div>
-                            <p className="text-sm text-[#6b7280]">
-                                Transition: {item.transitionReason}
+            {/* Cooldown Alert */}
+            {contextData.cooldown.active && (
+                <div className="card bg-[#c4a052]/10 border border-[#c4a052]/50">
+                    <div className="flex items-center gap-3">
+                        <span className="text-xl">⏸️</span>
+                        <div>
+                            <span className="text-[#c4a052] font-medium">Cooldown Active</span>
+                            <p className="text-sm text-[#8b98a5]">
+                                {contextData.cooldown.reason || 'Regime transition cooldown'} — {contextData.cooldown.remaining} remaining
                             </p>
                         </div>
-                    ))}
+                    </div>
                 </div>
-            </div>
+            )}
 
-            {/* Context State Descriptions */}
-            <div className="card bg-[#1a1f26]">
+            {/* Regime Timeline */}
+            <div className="card">
                 <div className="card-header">
-                    <span className="card-title">State Reference</span>
+                    <span className="card-title">Regime Timeline</span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-3 border border-[#2d3640] rounded-md">
-                        <span className="badge badge-success mb-2">TRENDING_UP</span>
-                        <p className="text-sm text-[#8b98a5]">
-                            Clear upward momentum. Long entries enabled, shorts restricted.
-                        </p>
+                {contextData.history.length === 0 ? (
+                    <div className="text-center py-8 text-[#6b7280]">
+                        No regime history available
                     </div>
-                    <div className="p-3 border border-[#2d3640] rounded-md">
-                        <span className="badge badge-danger mb-2">TRENDING_DOWN</span>
-                        <p className="text-sm text-[#8b98a5]">
-                            Clear downward momentum. Short entries enabled, longs restricted.
-                        </p>
+                ) : (
+                    <div className="space-y-0">
+                        {contextData.history.map((entry, idx) => (
+                            <div
+                                key={idx}
+                                className={`flex items-start gap-4 p-4 ${entry.active ? 'bg-[#1a1f26] rounded-md' : ''}`}
+                            >
+                                {/* Timeline connector */}
+                                <div className="flex flex-col items-center">
+                                    <div className={`w-2.5 h-2.5 rounded-full ${entry.active ? 'bg-[#5b7a9d]' : 'bg-[#2d3640]'}`} />
+                                    {idx < contextData.history.length - 1 && (
+                                        <div className="w-px h-12 bg-[#2d3640]" />
+                                    )}
+                                </div>
+
+                                {/* Content */}
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <span className="text-xs text-[#6b7280]">{entry.startTime}</span>
+                                        <span className={`badge ${stateColors[entry.state] || 'badge-neutral'}`}>
+                                            {stateIcons[entry.state] || ''} {entry.state}
+                                        </span>
+                                        <span className="text-xs text-[#6b7280]">{entry.duration}</span>
+                                        {entry.active && <span className="badge badge-neutral">NOW</span>}
+                                    </div>
+                                    <p className="text-sm text-[#8b98a5]">{entry.transitionReason}</p>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                    <div className="p-3 border border-[#2d3640] rounded-md">
-                        <span className="badge badge-accent mb-2">RANGING</span>
-                        <p className="text-sm text-[#8b98a5]">
-                            Consolidation phase. Mean reversion strategies enabled, reduced position sizes.
-                        </p>
-                    </div>
-                    <div className="p-3 border border-[#2d3640] rounded-md">
-                        <span className="badge badge-warning mb-2">HIGH_VOLATILITY</span>
-                        <p className="text-sm text-[#8b98a5]">
-                            Elevated volatility. Trading restricted, capital protection mode.
-                        </p>
-                    </div>
-                </div>
+                )}
             </div>
         </div>
     );

@@ -44,6 +44,8 @@ class ApiConfig:
     def is_configured(self) -> bool:
         """Check if API credentials are configured (for non-paper modes)."""
         if self.mode == TradingMode.PAPER:
+            # PAPER mode is deprecated - still return True but prefer TESTNET
+            logger.warning("PAPER mode is deprecated. Use TESTNET for testing.")
             return True
         return bool(self.api_key and self.api_secret)
 

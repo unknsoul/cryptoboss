@@ -8,41 +8,92 @@
  * - Dangerous actions require confirmation
  * - No strategy editing here
  * - Read-only view of risk limits
+ * 
+ * NOTE: Paper trading has been PERMANENTLY REMOVED.
+ * Use TESTNET for testing, LIVE for production.
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 
-// Mock settings data
-const settingsData = {
-    tradingMode: 'paper' as 'paper' | 'live',
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Default settings state (shows empty/loading until API loads)
+const defaultSettings = {
+    tradingMode: 'testnet' as 'testnet' | 'live',
     apiConnection: {
         exchange: 'Binance',
-        status: 'connected',
-        lastPing: '45ms',
+        status: 'disconnected' as 'connected' | 'disconnected' | 'error',
+        lastPing: '--',
         testnet: true,
     },
     riskLimits: {
-        dailyLossLimit: 500,
-        weeklyLossLimit: 1500,
-        maxDrawdown: 10,
-        maxPositions: 5,
-        maxExposure: 5000,
-        tradesPerDay: 10,
-        tradesPerContext: 3,
-        lossesPerBias: 2,
+        dailyLossLimit: 0,
+        weeklyLossLimit: 0,
+        maxDrawdown: 0,
+        maxPositions: 0,
+        maxExposure: 0,
+        tradesPerDay: 0,
+        tradesPerContext: 0,
+        lossesPerBias: 0,
     },
 };
 
 export default function SettingsPage() {
-    const [mode, setMode] = useState(settingsData.tradingMode);
+    const { token } = useAuth();
+    const [settings, setSettings] = useState(defaultSettings);
+    const [mode, setMode] = useState<'testnet' | 'live'>('testnet');
+    const [loading, setLoading] = useState(true);
     const [showModeConfirm, setShowModeConfirm] = useState(false);
     const [killSwitchStep, setKillSwitchStep] = useState(0);
 
+    // Fetch settings from API
+    const fetchSettings = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/settings`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setSettings({
+                    tradingMode: data.trading_mode || 'testnet',
+                    apiConnection: {
+                        exchange: data.exchange || 'Binance',
+                        status: data.api_connected ? 'connected' : 'disconnected',
+                        lastPing: data.latency_ms ? `${data.latency_ms}ms` : '--',
+                        testnet: data.testnet !== false,
+                    },
+                    riskLimits: {
+                        dailyLossLimit: data.risk?.daily_loss_limit || 0,
+                        weeklyLossLimit: data.risk?.weekly_loss_limit || 0,
+                        maxDrawdown: data.risk?.max_drawdown || 0,
+                        maxPositions: data.risk?.max_positions || 0,
+                        maxExposure: data.risk?.max_exposure || 0,
+                        tradesPerDay: data.risk?.trades_per_day || 0,
+                        tradesPerContext: data.risk?.trades_per_context || 0,
+                        lossesPerBias: data.risk?.losses_per_bias || 0,
+                    }
+                });
+                setMode(data.trading_mode === 'live' ? 'live' : 'testnet');
+            }
+        } catch (e) {
+            console.error('Failed to fetch settings:', e);
+            // Keep default empty state on error
+        } finally {
+            setLoading(false);
+        }
+    }, [token]);
+
+    useEffect(() => {
+        fetchSettings();
+    }, [fetchSettings]);
+
     const handleModeChange = () => {
-        if (mode === 'paper') {
+        if (mode === 'testnet') {
             setShowModeConfirm(true);
         } else {
-            setMode('paper');
+            setMode('testnet');
         }
     };
 
@@ -84,21 +135,21 @@ export default function SettingsPage() {
                             <div>
                                 <span className="text-[#e7e9ea] font-medium">Current Mode</span>
                                 <p className="text-sm text-[#6b7280] mt-1">
-                                    {mode === 'paper'
-                                        ? 'Simulated trading with no real funds at risk'
+                                    {mode === 'testnet'
+                                        ? 'Testing with Binance Testnet (no real funds)'
                                         : 'LIVE trading with real funds'}
                                 </p>
                             </div>
-                            <span className={`badge ${mode === 'paper' ? 'badge-accent' : 'badge-danger'}`}>
-                                {mode === 'paper' ? '📄 PAPER' : '🔴 LIVE'}
+                            <span className={`badge ${mode === 'testnet' ? 'badge-accent' : 'badge-danger'}`}>
+                                {mode === 'testnet' ? '🔷 TESTNET' : '🔴 LIVE'}
                             </span>
                         </div>
 
                         <button
                             onClick={handleModeChange}
-                            className={`btn w-full ${mode === 'paper' ? 'btn-danger' : 'btn-ghost'}`}
+                            className={`btn w-full ${mode === 'testnet' ? 'btn-danger' : 'btn-ghost'}`}
                         >
-                            {mode === 'paper' ? 'Switch to LIVE Mode' : 'Switch to PAPER Mode'}
+                            {mode === 'testnet' ? 'Switch to LIVE Mode' : 'Switch to TESTNET Mode'}
                         </button>
                     </div>
 
@@ -113,7 +164,7 @@ export default function SettingsPage() {
                                 </p>
                                 <ul className="list-disc list-inside text-sm text-[#8b98a5] mb-6 space-y-1">
                                     <li>Reviewed all risk limits</li>
-                                    <li>Tested thoroughly in paper mode</li>
+                                    <li>Tested thoroughly in TESTNET mode</li>
                                     <li>Verified exchange API connectivity</li>
                                     <li>Set appropriate position sizes</li>
                                 </ul>
@@ -145,22 +196,22 @@ export default function SettingsPage() {
                     <div className="space-y-3">
                         <div className="flex items-center justify-between py-2">
                             <span className="text-[#8b98a5]">Exchange</span>
-                            <span className="text-[#e7e9ea]">{settingsData.apiConnection.exchange}</span>
+                            <span className="text-[#e7e9ea]">{settings.apiConnection.exchange}</span>
                         </div>
                         <div className="flex items-center justify-between py-2">
                             <span className="text-[#8b98a5]">Status</span>
                             <span className="badge badge-success">
-                                {settingsData.apiConnection.status.toUpperCase()}
+                                {settings.apiConnection.status.toUpperCase()}
                             </span>
                         </div>
                         <div className="flex items-center justify-between py-2">
                             <span className="text-[#8b98a5]">Latency</span>
-                            <span className="text-[#e7e9ea]">{settingsData.apiConnection.lastPing}</span>
+                            <span className="text-[#e7e9ea]">{settings.apiConnection.lastPing}</span>
                         </div>
                         <div className="flex items-center justify-between py-2">
                             <span className="text-[#8b98a5]">Network</span>
                             <span className="badge badge-neutral">
-                                {settingsData.apiConnection.testnet ? 'TESTNET' : 'MAINNET'}
+                                {settings.apiConnection.testnet ? 'TESTNET' : 'MAINNET'}
                             </span>
                         </div>
                     </div>
@@ -176,35 +227,35 @@ export default function SettingsPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Daily Loss Limit</span>
-                            <span className="value-md block mt-1">${settingsData.riskLimits.dailyLossLimit}</span>
+                            <span className="value-md block mt-1">${settings.riskLimits.dailyLossLimit}</span>
                         </div>
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Weekly Loss Limit</span>
-                            <span className="value-md block mt-1">${settingsData.riskLimits.weeklyLossLimit}</span>
+                            <span className="value-md block mt-1">${settings.riskLimits.weeklyLossLimit}</span>
                         </div>
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Max Drawdown</span>
-                            <span className="value-md block mt-1">{settingsData.riskLimits.maxDrawdown}%</span>
+                            <span className="value-md block mt-1">{settings.riskLimits.maxDrawdown}%</span>
                         </div>
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Max Positions</span>
-                            <span className="value-md block mt-1">{settingsData.riskLimits.maxPositions}</span>
+                            <span className="value-md block mt-1">{settings.riskLimits.maxPositions}</span>
                         </div>
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Max Exposure</span>
-                            <span className="value-md block mt-1">${settingsData.riskLimits.maxExposure}</span>
+                            <span className="value-md block mt-1">${settings.riskLimits.maxExposure}</span>
                         </div>
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Trades/Day</span>
-                            <span className="value-md block mt-1">{settingsData.riskLimits.tradesPerDay}</span>
+                            <span className="value-md block mt-1">{settings.riskLimits.tradesPerDay}</span>
                         </div>
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Trades/Context</span>
-                            <span className="value-md block mt-1">{settingsData.riskLimits.tradesPerContext}</span>
+                            <span className="value-md block mt-1">{settings.riskLimits.tradesPerContext}</span>
                         </div>
                         <div className="bg-[#1a1f26] rounded-md p-4">
                             <span className="label block">Losses/Bias</span>
-                            <span className="value-md block mt-1">{settingsData.riskLimits.lossesPerBias}</span>
+                            <span className="value-md block mt-1">{settings.riskLimits.lossesPerBias}</span>
                         </div>
                     </div>
                 </div>

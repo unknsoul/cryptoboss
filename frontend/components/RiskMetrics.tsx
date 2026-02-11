@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface RiskMetric {
     sharpe_ratio: number;
     max_drawdown: number;
@@ -18,7 +20,7 @@ export default function RiskMetrics() {
     useEffect(() => {
         const fetchMetrics = async () => {
             try {
-                const response = await fetch('/api/risk');
+                const response = await fetch(`${API_URL}/api/risk`);
                 const result = await response.json();
                 // Handle wrapped response format
                 const data = result.data || result;

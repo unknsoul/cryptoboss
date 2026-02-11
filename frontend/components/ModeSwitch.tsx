@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 /**
  * Environment Switch Component
  * 
@@ -31,7 +33,7 @@ export default function ModeSwitch({ environment, onEnvironmentChange }: Environ
 
     const confirmLiveMode = async () => {
         try {
-            await fetch('/api/mode/live', { method: 'POST' });
+            await fetch(`${API_URL}/api/mode/live`, { method: 'POST' });
             onEnvironmentChange('live');
             setShowConfirmation(false);
         } catch (error) {
@@ -47,8 +49,8 @@ export default function ModeSwitch({ environment, onEnvironmentChange }: Environ
                 <div className="flex items-center gap-3">
                     <div
                         className={`w-3 h-3 rounded-full ${environment === 'live'
-                                ? 'bg-accent-red animate-pulse'
-                                : 'bg-accent-yellow'
+                            ? 'bg-accent-red animate-pulse'
+                            : 'bg-accent-yellow'
                             }`}
                     />
                     <span className="font-medium text-lg">
@@ -57,8 +59,8 @@ export default function ModeSwitch({ environment, onEnvironmentChange }: Environ
                     <button
                         onClick={handleEnvironmentSwitch}
                         className={`ml-auto px-3 py-1 rounded text-sm font-medium ${environment === 'testnet'
-                                ? 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
-                                : 'bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30'
+                            ? 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
+                            : 'bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30'
                             }`}
                     >
                         {environment === 'testnet' ? 'Switch to LIVE' : 'Switch to TESTNET'}

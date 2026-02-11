@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface Strategy {
     name: string;
     enabled: boolean;
@@ -19,7 +21,7 @@ export default function StrategyControls() {
     useEffect(() => {
         const fetchStrategies = async () => {
             try {
-                const response = await fetch('/api/strategies');
+                const response = await fetch(`${API_URL}/api/strategies`);
                 const result = await response.json();
                 // Handle wrapped response format
                 const data = result.data?.strategies || result.strategies || [];
@@ -39,7 +41,7 @@ export default function StrategyControls() {
     const toggleStrategy = async (strategyName: string) => {
         try {
             const strategy = strategies.find((s) => s.name === strategyName);
-            const endpoint = strategy?.enabled ? '/api/strategy/disable' : '/api/strategy/enable';
+            const endpoint = strategy?.enabled ? `${API_URL}/api/strategy/disable` : `${API_URL}/api/strategy/enable`;
 
             await fetch(endpoint, {
                 method: 'POST',

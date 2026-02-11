@@ -100,7 +100,8 @@ export default function LiveDecisionStream({
     useEffect(() => {
         async function loadDecisions() {
             try {
-                const res = await fetch("/api/v11/decisions?limit=20");
+                const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+                const res = await fetch(`${API_URL}/api/v11/decisions?limit=20`);
                 if (res.ok) {
                     const data = await res.json();
                     setDecisions(data.decisions || []);
@@ -145,8 +146,8 @@ export default function LiveDecisionStream({
                     </h2>
                     <span
                         className={`px-2 py-1 rounded-full text-xs ${isConnected
-                                ? "bg-green-500/20 text-green-400"
-                                : "bg-red-500/20 text-red-400"
+                            ? "bg-green-500/20 text-green-400"
+                            : "bg-red-500/20 text-red-400"
                             }`}
                     >
                         {isConnected ? "● Connected" : "○ Disconnected"}
@@ -202,8 +203,8 @@ export default function LiveDecisionStream({
                                             </span>
                                             <span
                                                 className={`text-sm font-medium ${decision.direction === "long"
-                                                        ? "text-green-400"
-                                                        : "text-red-400"
+                                                    ? "text-green-400"
+                                                    : "text-red-400"
                                                     }`}
                                             >
                                                 {decision.direction.toUpperCase()}
@@ -237,10 +238,10 @@ export default function LiveDecisionStream({
                                             <span className="text-gray-500">Confidence: </span>
                                             <span
                                                 className={`font-mono ${decision.confidence_score >= 0.7
-                                                        ? "text-green-400"
-                                                        : decision.confidence_score >= 0.5
-                                                            ? "text-yellow-400"
-                                                            : "text-red-400"
+                                                    ? "text-green-400"
+                                                    : decision.confidence_score >= 0.5
+                                                        ? "text-yellow-400"
+                                                        : "text-red-400"
                                                     }`}
                                             >
                                                 {(decision.confidence_score * 100).toFixed(0)}%
