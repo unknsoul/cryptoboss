@@ -28,10 +28,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+
+try:
+    from src.v3.orchestrator_v4 import OrchestratorV4
+    from src.v3.config_v4 import V4SystemConfig
+    from src.strategies.pro_strategy_builder import ProStrategyBuilder, INDICATOR_LIBRARY
+    V4_AVAILABLE = True
+except ImportError as e:
+    V4_AVAILABLE = False
+    OrchestratorV4 = Any  # type: ignore
+    V4SystemConfig = Any  # type: ignore
+    ProStrategyBuilder = Any  # type: ignore
+    INDICATOR_LIBRARY = {}  # type: ignore
+    logging.warning(f"v4 modules not available: {e}")
 
 # Import session manager
 try:
@@ -134,6 +147,17 @@ except ImportError as e:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Dashboard")
+
+_v4_orchestrator = None
+
+
+def get_v4() -> Optional["OrchestratorV4"]:
+    global _v4_orchestrator
+    if not V4_AVAILABLE:
+        return None
+    if _v4_orchestrator is None:
+        _v4_orchestrator = OrchestratorV4()
+    return _v4_orchestrator
 
 
 # === CryptoBoss 1.0.0 Data Source Tags ===
@@ -2116,6 +2140,325 @@ async def walk_forward_v2_strategy(strategy_id: str, payload: Dict[str, Any]):
     )
 
     return wrap_response({"walk_forward": wf_results}, DataSourceTag.DERIVED)
+
+
+# === v4 Dual-Source Professional APIs ===
+
+@app.get("/api/v4/status")
+async def v4_status():
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(orchestrator.status(), DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/config")
+async def v4_config():
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(orchestrator.config.summary(), DataSourceTag.DERIVED)
+
+
+@app.post("/api/v4/cycle")
+async def v4_run_cycle(payload: Dict[str, Any]):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    result = orchestrator.run_cycle(
+        symbol=payload.get("symbol", "BTC/USDT"),
+        timeframes=payload.get("timeframes", ["1m", "5m", "15m"]),
+        limit=int(payload.get("limit", 500)),
+        strategy_id=payload.get("strategy_id"),
+    )
+    return wrap_response(result, DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/price/ohlcv")
+async def v4_get_ohlcv(symbol: str = "BTC/USDT", timeframe: str = "5m", limit: int = 500):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    df = orchestrator.price_feed.get_ohlcv(symbol=symbol, timeframe=timeframe, limit=limit)
+    return wrap_response(
+        {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "source": orchestrator.price_feed.active_source,
+            "candles": df.reset_index().to_dict(orient="records"),
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v4/price/multi-tf")
+async def v4_get_multi_tf(symbol: str = "BTC/USDT", limit: int = 200):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    frames = orchestrator.price_feed.get_multi_timeframe(symbol=symbol, timeframes=["1m", "5m", "15m"], limit=limit)
+    return wrap_response(
+        {
+            "symbol": symbol,
+            "source": orchestrator.price_feed.active_source,
+            "timeframes": {tf: df.reset_index().to_dict(orient="records") for tf, df in frames.items()},
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v4/price/ticker")
+async def v4_get_ticker(symbol: str = "BTC/USDT"):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    return wrap_response(
+        {
+            "last_price": orchestrator.price_feed.get_last_price(symbol),
+            "spread_pct": orchestrator.price_feed.get_spread(symbol),
+            "source": orchestrator.price_feed.active_source,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v4/builder/indicators")
+async def v4_builder_indicators():
+    if not V4_AVAILABLE:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(INDICATOR_LIBRARY, DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/builder/presets")
+async def v4_builder_presets():
+    if not V4_AVAILABLE:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(list(ProStrategyBuilder.PRESETS.keys()), DataSourceTag.DERIVED)
+
+
+@app.post("/api/v4/builder/strategies")
+async def v4_create_strategy(payload: Dict[str, Any]):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    name = payload.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="Field 'name' is required")
+
+    strategy_id = orchestrator.build_strategy(
+        name=name,
+        symbol=payload.get("symbol", "BTC/USDT"),
+        timeframe=payload.get("timeframe", "5m"),
+    )
+    return wrap_response({"strategy_id": strategy_id}, DataSourceTag.DERIVED)
+
+
+@app.post("/api/v4/builder/strategies/preset")
+async def v4_load_preset(preset: str, symbol: str = "BTC/USDT", timeframe: str = "5m"):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    strategy_id = orchestrator.load_preset(preset, symbol=symbol, timeframe=timeframe)
+    strategy = orchestrator.strategy_builder.get(strategy_id)
+    score, breakdown, recommendation = orchestrator.score_strategy(strategy_id)
+
+    return wrap_response(
+        {
+            "strategy_id": strategy_id,
+            "name": strategy.name,
+            "ai_score": score,
+            "breakdown": breakdown,
+            "recommendation": recommendation,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v4/builder/strategies")
+async def v4_list_strategies():
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(orchestrator.strategy_builder.list(), DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/builder/strategies/{strategy_id}")
+async def v4_get_strategy(strategy_id: str):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    try:
+        strategy = orchestrator.strategy_builder.get(strategy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found") from exc
+
+    return wrap_response(json.loads(strategy.to_json()), DataSourceTag.DERIVED)
+
+
+@app.post("/api/v4/builder/strategies/{strategy_id}/conditions")
+async def v4_add_condition(strategy_id: str, payload: Dict[str, Any]):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    block_id = orchestrator.strategy_builder.add_condition(
+        strategy_id=strategy_id,
+        direction=payload["direction"],
+        indicator=payload["indicator"],
+        operator=payload["operator"],
+        threshold=payload["threshold"],
+        params=payload.get("params", {}),
+        output_key=payload.get("output_key", ""),
+        description=payload.get("description", ""),
+        canvas_x=float(payload.get("canvas_x", 0.0)),
+        canvas_y=float(payload.get("canvas_y", 0.0)),
+    )
+    return wrap_response({"block_id": block_id}, DataSourceTag.DERIVED)
+
+
+@app.delete("/api/v4/builder/strategies/{strategy_id}/conditions/{block_id}")
+async def v4_remove_condition(strategy_id: str, block_id: str):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    removed = orchestrator.strategy_builder.remove_condition(strategy_id, block_id)
+    return wrap_response({"removed": removed}, DataSourceTag.DERIVED)
+
+
+@app.post("/api/v4/builder/strategies/{strategy_id}/score")
+async def v4_score_strategy(strategy_id: str):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    score, breakdown, recommendation = orchestrator.score_strategy(strategy_id)
+    return wrap_response(
+        {
+            "score": score,
+            "breakdown": breakdown,
+            "recommendation": recommendation,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.post("/api/v4/builder/strategies/{strategy_id}/validate")
+async def v4_validate_strategy(strategy_id: str):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    valid, errors = orchestrator.validate_strategy(strategy_id)
+    return wrap_response({"valid": valid, "errors": errors}, DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/builder/strategies/{strategy_id}/canvas")
+async def v4_get_canvas(strategy_id: str):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(orchestrator.get_canvas(strategy_id), DataSourceTag.DERIVED)
+
+
+@app.post("/api/v4/builder/strategies/{strategy_id}/backtest")
+async def v4_backtest_strategy(strategy_id: str, payload: Dict[str, Any]):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+
+    try:
+        strategy = orchestrator.strategy_builder.get(strategy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found") from exc
+
+    df = orchestrator.price_feed.get_ohlcv(
+        symbol=strategy.symbol,
+        timeframe=strategy.entry_timeframe,
+        limit=int(payload.get("limit", 1000)),
+    )
+
+    from src.strategies.strategy_tester import StrategyTester
+
+    tester = StrategyTester(initial_capital=float(payload.get("initial_capital", 10000)))
+    result = tester.run(
+        df=df,
+        signal_fn=lambda _x: {"action": "HOLD"},
+        strategy_name=strategy.name,
+        strategy_id=strategy_id,
+        symbol=strategy.symbol,
+        timeframe=strategy.entry_timeframe,
+    )
+    monte_carlo = tester.run_monte_carlo(result) if bool(payload.get("run_monte_carlo", False)) else {}
+    strategy.backtest_summary = result.to_summary_dict()
+
+    return wrap_response(
+        {
+            "summary": result.to_summary_dict(),
+            "equity_curve": result.equity_curve.tolist(),
+            "monte_carlo": monte_carlo,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v4/builder/strategies/{strategy_id}/export")
+async def v4_export_strategy(strategy_id: str):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return Response(content=orchestrator.export_strategy(strategy_id), media_type="application/json")
+
+
+@app.post("/api/v4/builder/strategies/import")
+async def v4_import_strategy(payload: Dict[str, Any]):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    strategy_id = orchestrator.import_strategy(json.dumps(payload))
+    return wrap_response({"strategy_id": strategy_id}, DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/binance/balance")
+async def v4_binance_balance():
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(orchestrator.executor.get_balance(), DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/binance/mode")
+async def v4_binance_mode():
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(
+        {
+            "mode": orchestrator.executor.mode,
+            "is_live": orchestrator.executor.mode == "live",
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v4/binance/positions")
+async def v4_binance_positions():
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(orchestrator.executor.get_open_positions(), DataSourceTag.DERIVED)
+
+
+@app.get("/api/v4/binance/ticker")
+async def v4_binance_ticker(symbol: str = "BTC/USDT"):
+    orchestrator = get_v4()
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="v4 modules are unavailable")
+    return wrap_response(orchestrator.executor.get_ticker(symbol), DataSourceTag.DERIVED)
 
 
 @app.post("/api/engine/start")

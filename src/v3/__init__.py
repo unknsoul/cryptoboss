@@ -14,6 +14,8 @@ from .backtesting_engine import BacktestingEngine
 from .performance_tracker import PerformanceTracker
 from .ai_optimizer import AIOptimizer
 from .quantified_smc import detect_bos, detect_fvg, detect_order_block, detect_swing_points_fractal
+from .config_v4 import V4SystemConfig
+from .orchestrator_v4 import OrchestratorV4
 
 __all__ = [
     "V3SystemConfig",
@@ -34,6 +36,8 @@ __all__ = [
     "BacktestingEngine",
     "PerformanceTracker",
     "AIOptimizer",
+    "V4SystemConfig",
+    "OrchestratorV4",
     "detect_bos",
     "detect_fvg",
     "detect_order_block",

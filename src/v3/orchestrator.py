@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
+from src.smc.multi_timeframe_analyzer import MultiTimeframeAnalyzer
 
 from .ai_optimizer import AIOptimizer
 from .backtesting_engine import BacktestingEngine
@@ -29,6 +30,7 @@ class IntradayScalperV3System:
         self.config = config or build_default_v3_config()
 
         self.data_engine = DataEngine(self.config.data_engine)
+        self.mtf_analyzer = MultiTimeframeAnalyzer()
         self.market_structure_engine = MarketStructureEngine(self.config.market_structure_engine)
         self.smart_money_engine = SmartMoneyEngine(self.config.smart_money_engine)
         self.signal_engine = SignalEngine(self.config.signal_engine)
@@ -50,16 +52,23 @@ class IntradayScalperV3System:
         order_type: str = "market",
     ) -> Dict[str, Any]:
         prepared = self.data_engine.prepare_multi_timeframe(frames_by_timeframe)
+        mtf_result = self.mtf_analyzer.analyze(prepared)
 
         market_structure = self.market_structure_engine.analyze(
             prepared["15m"],
             prepared["5m"],
         )
+        market_structure["mtf_alignment"] = mtf_result
 
         smart_money_all = self.smart_money_engine.analyze_multi_timeframe(prepared)
         smart_money_primary = smart_money_all.get("5m") or next(iter(smart_money_all.values()))
 
-        feature_row = self._build_signal_feature_row(market_structure, smart_money_primary, prepared["1m"])
+        feature_row = self._build_signal_feature_row(
+            market_structure,
+            smart_money_primary,
+            prepared["1m"],
+            mtf_result,
+        )
         ai_probability = self.ai_optimizer.predict_trade_success_probability(feature_row)
 
         signal = self.signal_engine.evaluate(
@@ -238,8 +247,10 @@ class IntradayScalperV3System:
         market_structure: Dict[str, Any],
         smart_money: Dict[str, Any],
         ltf_frame: pd.DataFrame,
+        mtf_result: Optional[Dict[str, Any]] = None,
     ) -> list:
         latest = ltf_frame.iloc[-1]
+        mtf_score = float((mtf_result or {}).get("alignment_score", 0.0))
         return [
             float(bool(market_structure.get("bos", {}).get("confirmed", False))),
             float(bool(market_structure.get("choch", {}).get("confirmed", False))),
@@ -248,4 +259,5 @@ class IntradayScalperV3System:
             float(bool(smart_money.get("liquidity_sweep", False))),
             float(latest.get("volatility", 0.0)),
             float(latest.get("momentum", 0.0)),
+            mtf_score,
         ]

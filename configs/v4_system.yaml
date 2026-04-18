@@ -1,0 +1,72 @@
+# CryptoBoss v4.0 System Configuration
+
+system:
+  version: 4.0_dual_source_pro
+  architecture: modular_microservices_v4
+  log_level: INFO
+  log_file: logs/cryptoboss.log
+
+data_source:
+  primary: mt5
+  fallback: binance
+  candles_per_tf: 500
+  timeframes:
+    - 1m
+    - 5m
+    - 15m
+    - 1h
+
+binance:
+  mode: testnet
+  market_type: spot
+  max_order_size_usdt: 1000
+  testnet_rest: https://testnet.binance.vision
+  live_rest: https://api.binance.com
+
+mt5:
+  timeframes:
+    - 1m
+    - 5m
+    - 15m
+    - 1h
+  symbols:
+    - BTCUSD
+    - ETHUSD
+    - SOLUSD
+  candles_required: 500
+
+signal_engine:
+  buy_threshold: 6
+  sell_threshold: 6
+  min_trade_score: 7
+  probability_threshold: 0.65
+  score_weights:
+    bos: 2
+    ob_touch: 3
+    fvg_touch: 2
+    trend: 2
+    momentum: 1
+
+risk_engine:
+  risk_per_trade: 1.0
+  rr_ratio: 2.0
+  max_trades_per_day: 10
+  max_drawdown_pct: 5.0
+  max_daily_loss_pct: 3.0
+
+strategy_builder:
+  max_conditions_per_side: 10
+  min_ai_score_to_backtest: 40.0
+  save_path: data/strategies/
+  presets:
+    - smc_scalper_pro
+    - ema_ribbon_momentum
+    - vwap_mean_reversion
+    - choch_reversal_pro
+    - squeeze_breakout
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT

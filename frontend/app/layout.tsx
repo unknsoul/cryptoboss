@@ -4,6 +4,7 @@ import './globals.css';
 import { Inter } from 'next/font/google';
 import { useState, useEffect } from 'react';
 import { Sidebar } from '../components/layout/Sidebar';
+import { Topbar } from '@/components/layout/Topbar';
 import { SessionProvider, useSession, TradingMode } from '../contexts/SessionContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { ApiKeyModal } from '../components/ApiKeyModal';
@@ -32,12 +33,6 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     }, []);
 
     const handleKillSwitch = () => {
-        if (killSwitchStep === 0) {
-            setKillSwitchStep(1);
-            setTimeout(() => setKillSwitchStep(0), 3000);
-            return;
-        }
-        // Second click - activate
         console.log('KILL SWITCH ACTIVATED');
         setSystemStatus('critical');
         setExchangeHealth('HALTED');
@@ -128,134 +123,13 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                 onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
 
-            {/* Topbar */}
-            <div className={`transition-all duration-300 ${sidebarCollapsed ? 'pl-16' : 'pl-56'}`}>
-                <header
-                    className="fixed top-0 right-0 z-30 h-14 bg-[#0f1419] border-b border-[#2d3640]"
-                    style={{ left: sidebarCollapsed ? '4rem' : '14rem' }}
-                >
-                    <div className="flex h-full items-center justify-between px-4">
-                        {/* Left: System Status + Session Info */}
-                        <div className="flex items-center gap-4">
-                            {/* System State Indicator */}
-                            <div className="flex items-center gap-2">
-                                <div className={`status-dot ${getStatusColor(systemStatus)}`} />
-                                <span className="text-sm text-[#8b98a5]">
-                                    {getStatusText(systemStatus)}
-                                </span>
-                            </div>
-
-                            {/* Exchange Health Stage */}
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs text-[#6b7280]">Exchange:</span>
-                                <span className={`badge ${getExchangeHealthColor(exchangeHealth)}`}>
-                                    {exchangeHealth}
-                                </span>
-                            </div>
-
-                            {/* Connection Status */}
-                            <div className="flex items-center gap-1">
-                                <span>{getConnectionIcon()}</span>
-                                <span className="text-xs text-[#6b7280] capitalize">
-                                    {state.connectionStatus}
-                                </span>
-                            </div>
-
-                            {/* Session ID */}
-                            {mounted && (
-                                <div className="flex items-center gap-2 text-xs">
-                                    <span className="text-[#6b7280]">Session:</span>
-                                    <code className="text-[#5b7a9d] font-mono">{shortSessionId}</code>
-                                    <button
-                                        onClick={handleResetSession}
-                                        className="text-[#6b7280] hover:text-[#e7e9ea] text-xs"
-                                        title="Reset Session"
-                                    >
-                                        🔄
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Right: Mode Selector + Kill Switch */}
-                        <div className="flex items-center gap-3">
-                            {/* Mode Selector - PAPER REMOVED */}
-                            <div className="flex items-center gap-1 bg-[#1a1f26] rounded-md p-1">
-                                <button
-                                    onClick={() => handleModeChange('testnet')}
-                                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${state.mode === 'testnet' ? getModeColor('testnet') : 'text-[#6b7280] hover:text-[#e7e9ea]'
-                                        }`}
-                                >
-                                    Testnet
-                                </button>
-                                <button
-                                    onClick={() => handleModeChange('live')}
-                                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${state.mode === 'live' ? getModeColor('live') : 'text-[#6b7280] hover:text-[#e7e9ea]'
-                                        }`}
-                                >
-                                    Live
-                                </button>
-                            </div>
-
-                            {/* Current Mode Badge */}
-                            <span className={`badge ${getModeColor(state.mode)}`}>
-                                {getModeLabel(state.mode)}
-                            </span>
-
-                            {/* Kill Switch - Double confirmation per spec */}
-                            <button
-                                onClick={handleKillSwitch}
-                                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${killSwitchStep === 2
-                                    ? 'bg-[#6b7280] text-white cursor-not-allowed'
-                                    : killSwitchStep === 1
-                                        ? 'bg-[#c44444] text-white animate-pulse'
-                                        : 'bg-[#a65454] text-white hover:bg-[#b66464]'
-                                    }`}
-                                disabled={killSwitchStep === 2}
-                            >
-                                {killSwitchStep === 0 && 'KILL'}
-                                {killSwitchStep === 1 && 'CONFIRM'}
-                                {killSwitchStep === 2 && 'HALTED'}
-                            </button>
-
-                            {/* v1.0.1: User & Account Indicator */}
-                            {isAuthenticated && user && (
-                                <div className="flex items-center gap-2 pl-3 border-l border-[#2d3640]">
-                                    {activeAccount && (
-                                        <span className={`badge text-xs ${activeAccount.environment === 'LIVE'
-                                            ? 'bg-red-500/20 text-red-300'
-                                            : 'bg-yellow-500/20 text-yellow-300'
-                                            }`}>
-                                            {activeAccount.environment}
-                                        </span>
-                                    )}
-                                    <a
-                                        href="/accounts"
-                                        className="text-xs text-[#8b98a5] hover:text-[#e7e9ea] transition"
-                                    >
-                                        {user.email.split('@')[0]}
-                                    </a>
-                                    <button
-                                        onClick={logout}
-                                        className="text-xs text-[#6b7280] hover:text-[#a65454] transition"
-                                        title="Logout"
-                                    >
-                                        ⏻
-                                    </button>
-                                </div>
-                            )}
-                            {!isAuthenticated && (
-                                <a
-                                    href="/auth/login"
-                                    className="text-xs text-[#5b7a9d] hover:text-[#e7e9ea] transition"
-                                >
-                                    Sign In
-                                </a>
-                            )}
-                        </div>
-                    </div>
-                </header>
-            </div>
+            <Topbar
+                systemStatus={systemStatus}
+                tradingMode={state.mode === 'live' ? 'live' : 'paper'}
+                lastDecision={lastDecisionTime}
+                onKillSwitch={handleKillSwitch}
+                onModeToggle={() => handleModeChange(state.mode === 'live' ? 'testnet' : 'live')}
+            />
 
             {/* Main Content */}
             <main className={`pt-14 min-h-screen transition-all duration-300 ${sidebarCollapsed ? 'pl-16' : 'pl-56'

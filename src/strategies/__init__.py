@@ -38,6 +38,7 @@ from .intraday_scalper import IntradayScalper
 from .strategy_builder import StrategyBuilder
 from .strategy_tester import StrategyTester
 from .session_manager_pro import SessionManagerPro, SessionWindow
+from .pro_strategy_builder import ProStrategyBuilder, ProStrategy, INDICATOR_LIBRARY
 
 # Regime detection and selection
 from .regime_selection import RegimeDetector, StrategySelector, MarketRegime
@@ -66,6 +67,9 @@ __all__ = [
     'IntradayScalper',
     'StrategyBuilder',
     'StrategyTester',
+    'ProStrategyBuilder',
+    'ProStrategy',
+    'INDICATOR_LIBRARY',
     'SessionManagerPro',
     'SessionWindow',
     

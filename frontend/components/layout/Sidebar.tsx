@@ -4,16 +4,24 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
-const navigation = [
+type NavigationItem = {
+    name: string;
+    href: string;
+    icon: string;
+    isOperator?: boolean;
+    group?: string;
+};
+
+const navigation: NavigationItem[] = [
     { name: 'Overview', href: '/', icon: 'grid' },
     { name: 'Live Status', href: '/live', icon: 'activity' },
     { name: 'Decision Flow', href: '/decisions', icon: 'git-branch' },
     { name: 'Positions', href: '/positions', icon: 'briefcase' },
     { name: 'Risk & Capital', href: '/risk', icon: 'shield' },
     { name: 'Strategies', href: '/strategies', icon: 'cpu' },
-    { name: 'SMC Dashboard', href: '/smc', icon: 'layers' },
-    { name: 'Scalper Live', href: '/scalper', icon: 'zap' },
-    { name: 'Strategy Builder', href: '/builder', icon: 'sliders' },
+    { name: 'SMC', href: '/smc', icon: 'ChartBar', group: 'SCALPER V4' },
+    { name: 'Scalper', href: '/scalper', icon: 'Zap', group: 'SCALPER V4' },
+    { name: 'Builder', href: '/builder', icon: 'Blocks', group: 'SCALPER V4' },
     { name: 'Market Context', href: '/context', icon: 'trending-up' },
     { name: 'Execution & Health', href: '/health', icon: 'heart' },
     { name: 'Replay & Analysis', href: '/replay', icon: 'rewind' },
@@ -35,6 +43,9 @@ const iconMap: Record<string, JSX.Element> = {
     'layers': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2l9 5-9 5-9-5 9-5z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l9 5 9-5" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 17l9 5 9-5" /></svg>,
     'zap': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
     'sliders': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h10M4 12h16M4 18h10M14 6v0m0 12v0m6-6v0" /></svg>,
+    'ChartBar': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 15l3-3 3 2 4-6" /></svg>,
+    'Zap': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
+    'Blocks': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>,
     'trending-up': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>,
     'heart': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>,
     'rewind': <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>,
@@ -80,26 +91,34 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
             {/* Navigation */}
             <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
-                {regularNav.map((item) => {
+                {regularNav.map((item, index) => {
                     const isActive = pathname === item.href;
+                    const prevGroup = index > 0 ? regularNav[index - 1].group : undefined;
+                    const showGroupLabel = Boolean(item.group && item.group !== prevGroup);
                     return (
-                        <Link
-                            key={item.name}
-                            href={item.href}
-                            className={`relative flex items-center gap-3 px-3 py-2.5 rounded-md transition-all duration-200 ${isActive
-                                ? 'bg-[#5b7a9d]/10 text-[#5b7a9d]'
-                                : 'text-[#8b98a5] hover:bg-[#1a1f26] hover:text-[#e7e9ea]'
-                                }`}
-                            title={collapsed ? item.name : undefined}
-                        >
-                            {isActive && (
-                                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[#5b7a9d] rounded-r-full" />
+                        <div key={item.name}>
+                            {!collapsed && showGroupLabel && (
+                                <div className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-widest text-[#6b7280]">
+                                    {item.group}
+                                </div>
                             )}
-                            <span className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
-                                {iconMap[item.icon]}
-                            </span>
-                            {!collapsed && <span className="text-sm font-medium">{item.name}</span>}
-                        </Link>
+                            <Link
+                                href={item.href}
+                                className={`relative flex items-center gap-3 px-3 py-2.5 rounded-md transition-all duration-200 ${isActive
+                                    ? 'bg-[#5b7a9d]/10 text-[#5b7a9d]'
+                                    : 'text-[#8b98a5] hover:bg-[#1a1f26] hover:text-[#e7e9ea]'
+                                    }`}
+                                title={collapsed ? item.name : undefined}
+                            >
+                                {isActive && (
+                                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[#5b7a9d] rounded-r-full" />
+                                )}
+                                <span className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
+                                    {iconMap[item.icon]}
+                                </span>
+                                {!collapsed && <span className="text-sm font-medium">{item.name}</span>}
+                            </Link>
+                        </div>
                     );
                 })}
 
