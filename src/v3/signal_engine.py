@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-import numpy as np
 import pandas as pd
 
 from .config import SignalEngineConfig
@@ -22,117 +21,159 @@ class SignalEngine:
         market_structure: Dict[str, object],
         smart_money: Dict[str, object],
         ltf_frame: pd.DataFrame,
+        win_probability: Optional[float] = None,
     ) -> SignalOutput:
         if ltf_frame is None or ltf_frame.empty:
             return SignalOutput(action="HOLD", confidence=0.0, reason="No LTF market data")
 
-        trend_alignment = bool(
-            market_structure.get("trend_detection", {}).get("trend_alignment", False)
-        )
-        bos_confirmed = bool(market_structure.get("bos", {}).get("confirmed", False))
-        choch_confirmed = bool(market_structure.get("choch", {}).get("confirmed", False))
+        weights = self.config.score_weights
+        trend_alignment = bool(market_structure.get("trend_detection", {}).get("trend_alignment", False))
+        trend_direction = str(market_structure.get("latest_structure_direction", "neutral"))
 
-        price_at_ob = bool(smart_money.get("price_at_ob", False))
-        price_in_fvg = bool(smart_money.get("price_in_fvg", False))
+        bos_confirmed = bool(market_structure.get("bos", {}).get("confirmed", False))
+        bos_direction = self._latest_bos_direction(market_structure)
+
+        ob_signal = int(smart_money.get("ob_signal", 0))
+        fvg_signal = int(smart_money.get("fvg_signal", 0))
         liquidity_sweep = bool(smart_money.get("liquidity_sweep", False))
 
-        entry_gate = (
-            (not self.config.require_trend_alignment or trend_alignment)
-            and (not self.config.require_structure_confirmation or (bos_confirmed or choch_confirmed))
-            and (not self.config.require_price_in_ob_or_fvg or (price_at_ob or price_in_fvg))
-            and (not self.config.require_liquidity_sweep or liquidity_sweep)
-        )
+        momentum_direction = self._momentum_direction(ltf_frame)
 
-        if not entry_gate:
-            return SignalOutput(
-                action="HOLD",
-                confidence=0.2,
-                reason="Entry logic not satisfied",
-                metadata={
-                    "trend_alignment": trend_alignment,
-                    "bos_confirmed": bos_confirmed,
-                    "choch_confirmed": choch_confirmed,
-                    "price_at_ob": price_at_ob,
-                    "price_in_fvg": price_in_fvg,
-                    "liquidity_sweep": liquidity_sweep,
-                },
-            )
+        buy_score = 0
+        sell_score = 0
+        score_breakdown: Dict[str, object] = {
+            "trend_alignment": trend_alignment,
+            "bos_confirmed": bos_confirmed,
+            "ob_signal": ob_signal,
+            "fvg_signal": fvg_signal,
+            "momentum_direction": momentum_direction,
+            "liquidity_sweep": liquidity_sweep,
+        }
 
-        bullish_engulfing = self._is_bullish_engulfing(ltf_frame)
-        bearish_engulfing = self._is_bearish_engulfing(ltf_frame)
-        momentum_spike = self._has_momentum_spike(ltf_frame)
+        if trend_alignment:
+            if trend_direction == "bullish":
+                buy_score += int(weights.get("trend", 0))
+            elif trend_direction == "bearish":
+                sell_score += int(weights.get("trend", 0))
 
-        if "engulfing_candle" in self.config.confirmations and not (bullish_engulfing or bearish_engulfing):
-            return SignalOutput(action="HOLD", confidence=0.3, reason="Engulfing confirmation missing")
+        if bos_confirmed:
+            if bos_direction > 0:
+                buy_score += int(weights.get("bos", 0))
+            elif bos_direction < 0:
+                sell_score += int(weights.get("bos", 0))
 
-        if "momentum_spike" in self.config.confirmations and not momentum_spike:
-            return SignalOutput(action="HOLD", confidence=0.3, reason="Momentum spike confirmation missing")
+        if ob_signal > 0:
+            buy_score += int(weights.get("ob_touch", 0))
+        elif ob_signal < 0:
+            sell_score += int(weights.get("ob_touch", 0))
 
-        structure_direction = str(market_structure.get("latest_structure_direction", "neutral"))
-        if structure_direction == "neutral":
-            structure_direction = "bullish" if bullish_engulfing else "bearish" if bearish_engulfing else "neutral"
+        if fvg_signal > 0:
+            buy_score += int(weights.get("fvg_touch", 0))
+        elif fvg_signal < 0:
+            sell_score += int(weights.get("fvg_touch", 0))
+
+        if momentum_direction > 0:
+            buy_score += int(weights.get("momentum", 0))
+        elif momentum_direction < 0:
+            sell_score += int(weights.get("momentum", 0))
+
+        if liquidity_sweep:
+            if momentum_direction > 0:
+                buy_score += 1
+            elif momentum_direction < 0:
+                sell_score += 1
+
+        if win_probability is None:
+            win_probability = 0.5
+
+        probability_pass = win_probability >= self.config.probability_threshold
+        score_breakdown["buy_score"] = buy_score
+        score_breakdown["sell_score"] = sell_score
+        score_breakdown["win_probability"] = win_probability
+        score_breakdown["probability_threshold"] = self.config.probability_threshold
+
+        max_score = max(buy_score, sell_score)
+        signal_action = "HOLD"
+        reason = "No score threshold met"
+
+        buy_threshold = self.config.buy_threshold
+        sell_threshold = self.config.sell_threshold
+
+        if not probability_pass:
+            buy_threshold += self.config.threshold_relaxation
+            sell_threshold += self.config.threshold_relaxation
+            score_breakdown["probability_penalty"] = True
+
+        if buy_score >= buy_threshold and buy_score > sell_score:
+            signal_action = "BUY"
+            reason = "Weighted scoring BUY threshold met"
+        elif sell_score >= sell_threshold and sell_score > buy_score:
+            signal_action = "SELL"
+            reason = "Weighted scoring SELL threshold met"
+        elif self.config.force_trade_if_no_signal:
+            if buy_score > sell_score and buy_score > 0:
+                signal_action = "BUY"
+                reason = "Forced BUY fallback based on positive relative score"
+            elif sell_score > buy_score and sell_score > 0:
+                signal_action = "SELL"
+                reason = "Forced SELL fallback based on positive relative score"
+            else:
+                reason = "Forced mode active but no directional edge"
+
+        if max_score < self.config.min_trade_score and signal_action in ("BUY", "SELL"):
+            if self.config.force_trade_if_no_signal:
+                reason = f"{reason} | trade score below ideal threshold ({self.config.min_trade_score})"
+            else:
+                signal_action = "HOLD"
+                reason = f"Trade score below minimum threshold ({self.config.min_trade_score})"
 
         latest_price = float(ltf_frame["close"].iloc[-1])
+        confidence = min(max_score / max(self.config.buy_threshold, self.config.sell_threshold, 1), 1.0)
 
-        if structure_direction == "bullish" and bullish_engulfing:
-            return SignalOutput(
-                action="BUY",
-                confidence=0.82,
-                reason="Trend alignment + BOS/CHoCH + OB/FVG + liquidity sweep + bullish confirmation",
-                direction="long",
-                entry_price=latest_price,
-                metadata={"confirmation": ["engulfing_candle", "momentum_spike"]},
-            )
+        direction = "neutral"
+        if signal_action == "BUY":
+            direction = "long"
+        elif signal_action == "SELL":
+            direction = "short"
 
-        if structure_direction == "bearish" and bearish_engulfing:
-            return SignalOutput(
-                action="SELL",
-                confidence=0.82,
-                reason="Trend alignment + BOS/CHoCH + OB/FVG + liquidity sweep + bearish confirmation",
-                direction="short",
-                entry_price=latest_price,
-                metadata={"confirmation": ["engulfing_candle", "momentum_spike"]},
-            )
-
-        return SignalOutput(action="HOLD", confidence=0.4, reason="Direction conflict in confirmations")
-
-    @staticmethod
-    def _is_bullish_engulfing(frame: pd.DataFrame) -> bool:
-        if len(frame) < 2:
-            return False
-
-        prev_candle = frame.iloc[-2]
-        curr_candle = frame.iloc[-1]
-
-        return (
-            float(prev_candle["close"]) < float(prev_candle["open"])
-            and float(curr_candle["close"]) > float(curr_candle["open"])
-            and float(curr_candle["open"]) <= float(prev_candle["close"])
-            and float(curr_candle["close"]) >= float(prev_candle["open"])
+        return SignalOutput(
+            action=signal_action,
+            confidence=float(confidence),
+            reason=reason,
+            direction=direction,
+            entry_price=latest_price,
+            metadata=score_breakdown,
         )
 
     @staticmethod
-    def _is_bearish_engulfing(frame: pd.DataFrame) -> bool:
-        if len(frame) < 2:
-            return False
-
-        prev_candle = frame.iloc[-2]
-        curr_candle = frame.iloc[-1]
-
-        return (
-            float(prev_candle["close"]) > float(prev_candle["open"])
-            and float(curr_candle["close"]) < float(curr_candle["open"])
-            and float(curr_candle["open"]) >= float(prev_candle["close"])
-            and float(curr_candle["close"]) <= float(prev_candle["open"])
-        )
-
-    @staticmethod
-    def _has_momentum_spike(frame: pd.DataFrame) -> bool:
+    def _momentum_direction(frame: pd.DataFrame) -> int:
         if len(frame) < 20:
-            return False
+            return 0
 
         returns = frame["close"].pct_change().fillna(0.0)
-        latest_abs = abs(float(returns.iloc[-1]))
+        latest = float(returns.iloc[-1])
         baseline = float(returns.abs().rolling(20, min_periods=5).mean().iloc[-1])
-        threshold = max(baseline * 1.8, 0.0008)
-        return latest_abs >= threshold
+        spike_threshold = max(baseline * 1.8, 0.0008)
+
+        if latest > spike_threshold:
+            return 1
+        if latest < -spike_threshold:
+            return -1
+        return 0
+
+    @staticmethod
+    def _latest_bos_direction(market_structure: Dict[str, object]) -> int:
+        bos = market_structure.get("bos", {})
+        events = []
+        events.extend(bos.get("htf", []))
+        events.extend(bos.get("ltf", []))
+        if not events:
+            return 0
+
+        events = sorted(events, key=lambda event: event.get("timestamp"))
+        latest = str(events[-1].get("direction", ""))
+        if latest == "bullish":
+            return 1
+        if latest == "bearish":
+            return -1
+        return 0

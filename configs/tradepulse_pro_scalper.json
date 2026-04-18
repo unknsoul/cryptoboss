@@ -1,0 +1,158 @@
+{
+  "project": "TradePulse_Pro_Scalper",
+  "modules": [
+    "data_loader",
+    "structure_detector",
+    "smc_detector",
+    "signal_engine",
+    "strategy_builder",
+    "backtester",
+    "execution_engine",
+    "evaluation_layer"
+  ],
+  "architecture": {
+    "data_layer": "collect + preprocess",
+    "structure_layer": "bos/choch detection",
+    "zone_layer": "ob/fvg/liquidity",
+    "signal_layer": "entry logic",
+    "filter_layer": "ml probability",
+    "execution_layer": "order placement",
+    "evaluation_layer": "performance tracking"
+  },
+  "data_loader": {
+    "input": "mt5",
+    "timeframes": [
+      "1m",
+      "5m"
+    ],
+    "columns": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "tick_volume"
+    ]
+  },
+  "structure_detector": {
+    "swing_points": {
+      "method": "fractals",
+      "left": 2,
+      "right": 2
+    },
+    "bos": {
+      "definition": "break of previous swing high/low with strong momentum candle",
+      "lookback": 20,
+      "break_threshold": 0.0001,
+      "conditions": [
+        "close > previous_high + threshold OR close < previous_low - threshold",
+        "volume_spike == true"
+      ],
+      "volume_spike_multiplier": 1.5
+    },
+    "choch": {
+      "definition": "change in trend direction",
+      "conditions": [
+        "bullish_to_bearish OR bearish_to_bullish",
+        "break of internal structure"
+      ]
+    }
+  },
+  "smc_detector": {
+    "order_block": {
+      "candle_range": "last_opposite_candle_before_impulse",
+      "impulse_multiplier": 2.0,
+      "lookback": 10,
+      "volume_condition": "volume > 1.5x avg_volume",
+      "mitigation": "price_return_within_zone"
+    },
+    "fvg": {
+      "definition": "3 candle imbalance",
+      "conditions": [
+        "candle1_high < candle3_low (bullish)",
+        "candle1_low > candle3_high (bearish)"
+      ],
+      "min_gap": 0.00005
+    },
+    "liquidity": {
+      "zones": [
+        "equal highs",
+        "equal lows",
+        "previous highs/lows"
+      ]
+    }
+  },
+  "signal_engine": {
+    "score_weights": {
+      "bos": 2,
+      "ob_touch": 3,
+      "fvg_touch": 2,
+      "trend": 2,
+      "momentum": 1
+    },
+    "buy_threshold": 6,
+    "sell_threshold": 6,
+    "trade_quality": {
+      "factors": [
+        "trend_alignment",
+        "liquidity_sweep",
+        "zone_strength",
+        "volatility"
+      ],
+      "min_score": 7
+    },
+    "probability_filter": {
+      "input": "signal_features",
+      "output": "win_probability",
+      "threshold": 0.65
+    },
+    "force_trade_if_no_signal": true
+  },
+  "market_filter": {
+    "sessions": [
+      "london",
+      "newyork"
+    ],
+    "min_volatility": "atr_threshold",
+    "spread_limit": "max_spread_allowed"
+  },
+  "strategy_builder": {
+    "type": "rule_composer",
+    "rules": [
+      "trend_alignment",
+      "bos_confirmation",
+      "zone_reaction",
+      "momentum_confirmation"
+    ],
+    "combination_method": "weighted_scoring",
+    "validation": [
+      "walk_forward_analysis",
+      "out_of_sample_testing"
+    ],
+    "selection": "robustness_score_not_profit",
+    "output": "dynamic_strategy.json"
+  },
+  "backtester": {
+    "mode": "walk_forward",
+    "split": 0.7,
+    "metrics": [
+      "winrate",
+      "drawdown",
+      "profit_factor"
+    ],
+    "simulation": {
+      "spread": true,
+      "slippage": true,
+      "commission": true
+    }
+  },
+  "execution_engine": {
+    "platform": "mt5",
+    "order_types": [
+      "market",
+      "limit"
+    ],
+    "slippage_control": true,
+    "spread_filter": true,
+    "execution_speed": "high_frequency"
+  }
+}

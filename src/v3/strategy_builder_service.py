@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
+
 from src.strategies.strategy_builder import IndicatorType, LogicGate, StrategyBuilder
 
 from .config import StrategyBuilderConfig
 from .models import StrategyArtifact
+from .strategy_builder_engine import StrategyBuilderEngine, StrategyValidationEngine
 
 
 class StrategyBuilderService:
@@ -18,6 +21,7 @@ class StrategyBuilderService:
     def __init__(self, config: Optional[StrategyBuilderConfig] = None):
         self.config = config or StrategyBuilderConfig()
         self.builder = StrategyBuilder()
+        self.rule_engine = StrategyBuilderEngine()
         self._artifacts: Dict[str, StrategyArtifact] = {}
 
     def list_presets(self) -> List[str]:
@@ -168,6 +172,98 @@ class StrategyBuilderService:
 
     def get_artifact(self, strategy_id: str) -> Optional[StrategyArtifact]:
         return self._artifacts.get(strategy_id)
+
+    def create_rule_strategy(
+        self,
+        name: str,
+        rules: List[str],
+        weights: Dict[str, float],
+        buy_threshold: float = 6.0,
+        sell_threshold: float = 6.0,
+        force_trade_if_no_signal: bool = True,
+    ) -> Dict[str, Any]:
+        strategy = self.rule_engine.build(
+            name=name,
+            rules=rules,
+            weights=weights,
+            buy_threshold=buy_threshold,
+            sell_threshold=sell_threshold,
+            force_trade_if_no_signal=force_trade_if_no_signal,
+            metadata={
+                "type": self.config.strategy_type,
+                "combination_method": self.config.combination_method,
+                "validation": self.config.validation,
+                "selection": self.config.selection,
+            },
+        )
+        return {
+            "name": strategy.name,
+            "rules": strategy.rules,
+            "weights": strategy.weights,
+            "buy_threshold": strategy.buy_threshold,
+            "sell_threshold": strategy.sell_threshold,
+            "force_trade_if_no_signal": strategy.force_trade_if_no_signal,
+            "metadata": strategy.metadata,
+        }
+
+    def evaluate_rule_strategy(self, feature_frame: pd.DataFrame, strategy_name: str) -> pd.DataFrame:
+        strategy = self.rule_engine.get(strategy_name)
+        return self.rule_engine.evaluate_dataframe(feature_frame, strategy)
+
+    def validate_rule_strategy(
+        self,
+        strategy_name: str,
+        df: pd.DataFrame,
+        backtesting_engine,
+        param_grid: Optional[Dict[str, List[Any]]] = None,
+        n_splits: int = 5,
+    ) -> Dict[str, Any]:
+        strategy = self.rule_engine.get(strategy_name)
+        signal_fn = self.rule_engine.compile_signal_function(strategy)
+
+        validator = StrategyValidationEngine(backtesting_engine)
+        oos = validator.out_of_sample_test(
+            df=df,
+            signal_fn=signal_fn,
+            split=0.7,
+            strategy_name=strategy_name,
+            strategy_id=strategy_name.upper()[:10],
+        )
+
+        if param_grid is None:
+            param_grid = {
+                "buy_threshold": [max(strategy.buy_threshold - 1, 1), strategy.buy_threshold, strategy.buy_threshold + 1],
+                "sell_threshold": [max(strategy.sell_threshold - 1, 1), strategy.sell_threshold, strategy.sell_threshold + 1],
+            }
+
+        def signal_fn_factory(params: Dict[str, Any]):
+            tuned = self.rule_engine.build(
+                name=f"{strategy_name}_wf_tmp",
+                rules=strategy.rules,
+                weights=strategy.weights,
+                buy_threshold=float(params.get("buy_threshold", strategy.buy_threshold)),
+                sell_threshold=float(params.get("sell_threshold", strategy.sell_threshold)),
+                force_trade_if_no_signal=strategy.force_trade_if_no_signal,
+                metadata=strategy.metadata,
+            )
+            return self.rule_engine.compile_signal_function(tuned)
+
+        walk_forward = validator.walk_forward_validation(
+            df=df,
+            signal_fn_factory=signal_fn_factory,
+            param_grid=param_grid,
+            n_splits=n_splits,
+            strategy_name=strategy_name,
+            strategy_id=strategy_name.upper()[:10],
+        )
+
+        return {
+            "validation": self.config.validation,
+            "selection": self.config.selection,
+            "out_of_sample": oos,
+            "walk_forward": walk_forward,
+            "robustness_score": walk_forward.get("robustness_score", 0.0),
+        }
 
     @staticmethod
     def _normalize_block(block: Any) -> Dict[str, Any]:

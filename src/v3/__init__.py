@@ -9,9 +9,11 @@ from .signal_engine import SignalEngine, SignalOutput
 from .risk_engine import RiskEngine, RiskDecision
 from .execution_engine import ExecutionEngine, ExecutionReport
 from .strategy_builder_service import StrategyBuilderService
+from .strategy_builder_engine import StrategyBuilderEngine, StrategyValidationEngine
 from .backtesting_engine import BacktestingEngine
 from .performance_tracker import PerformanceTracker
 from .ai_optimizer import AIOptimizer
+from .quantified_smc import detect_bos, detect_fvg, detect_order_block, detect_swing_points_fractal
 
 __all__ = [
     "V3SystemConfig",
@@ -27,7 +29,13 @@ __all__ = [
     "ExecutionEngine",
     "ExecutionReport",
     "StrategyBuilderService",
+    "StrategyBuilderEngine",
+    "StrategyValidationEngine",
     "BacktestingEngine",
     "PerformanceTracker",
     "AIOptimizer",
+    "detect_bos",
+    "detect_fvg",
+    "detect_order_block",
+    "detect_swing_points_fractal",
 ]

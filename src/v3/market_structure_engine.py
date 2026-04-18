@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from .config import MarketStructureConfig
+from .quantified_smc import detect_bos as quantify_bos
+from .quantified_smc import detect_swing_points_fractal
 
 
 class MarketStructureEngine:
@@ -20,6 +22,9 @@ class MarketStructureEngine:
         htf = self._prepare(htf_frame)
         ltf = self._prepare(ltf_frame)
 
+        htf_swings = self.detect_swings(htf)
+        ltf_swings = self.detect_swings(ltf)
+
         htf_bos = self.detect_bos(htf)
         ltf_bos = self.detect_bos(ltf)
 
@@ -32,14 +37,31 @@ class MarketStructureEngine:
 
         analysis = {
             "bos": {
+                "definition": "break of previous swing high/low with strong momentum candle",
+                "conditions": [
+                    "close > previous_high + threshold",
+                    "volume_spike == true",
+                ],
                 "htf": htf_bos,
                 "ltf": ltf_bos,
                 "confirmed": bool(htf_bos or ltf_bos),
             },
             "choch": {
+                "definition": "change in trend direction",
+                "conditions": [
+                    "bullish_to_bearish OR bearish_to_bullish",
+                    "break of internal structure",
+                ],
                 "htf": htf_choch,
                 "ltf": ltf_choch,
                 "confirmed": bool(htf_choch or ltf_choch),
+            },
+            "swing_points": {
+                "method": self.config.swing_method,
+                "left": self.config.swing_left,
+                "right": self.config.swing_right,
+                "htf": htf_swings,
+                "ltf": ltf_swings,
             },
             "trend_detection": {
                 "method": self.config.trend_method,
@@ -54,46 +76,63 @@ class MarketStructureEngine:
         self.last_analysis = analysis
         return analysis
 
-    def detect_bos(self, frame: pd.DataFrame, lookback: int = 5) -> List[Dict[str, object]]:
+    def detect_swings(self, frame: pd.DataFrame) -> List[Dict[str, object]]:
+        swings = detect_swing_points_fractal(
+            frame,
+            left=self.config.swing_left,
+            right=self.config.swing_right,
+        )
+
         events: List[Dict[str, object]] = []
-        if len(frame) < lookback + 2:
-            return events
+        for idx in swings.index:
+            swing_high = int(swings.at[idx, "swing_high"])
+            swing_low = int(swings.at[idx, "swing_low"])
+            if swing_high == 0 and swing_low == 0:
+                continue
 
-        volume_avg = frame["tick_volume"].rolling(20, min_periods=3).mean()
-
-        for idx in range(lookback, len(frame)):
-            previous_high = float(frame["high"].iloc[idx - lookback : idx].max())
-            previous_low = float(frame["low"].iloc[idx - lookback : idx].min())
-
-            close = float(frame["close"].iloc[idx])
-            volume = float(frame["tick_volume"].iloc[idx])
-            avg_volume = float(volume_avg.iloc[idx]) if not pd.isna(volume_avg.iloc[idx]) else volume
-            volume_spike = volume >= avg_volume * self.config.volume_spike_mult
-
-            bullish_break = close > previous_high + self.config.bos_threshold
-            bearish_break = close < previous_low - self.config.bos_threshold
-
-            if bullish_break and volume_spike:
+            if swing_high:
                 events.append(
                     {
-                        "timestamp": frame.index[idx],
-                        "direction": "bullish",
-                        "close": close,
-                        "broken_level": previous_high,
-                        "volume_spike": True,
+                        "timestamp": idx,
+                        "type": "swing_high",
+                        "price": float(swings.at[idx, "high"]),
+                    }
+                )
+            if swing_low:
+                events.append(
+                    {
+                        "timestamp": idx,
+                        "type": "swing_low",
+                        "price": float(swings.at[idx, "low"]),
                     }
                 )
 
-            if bearish_break and volume_spike:
-                events.append(
-                    {
-                        "timestamp": frame.index[idx],
-                        "direction": "bearish",
-                        "close": close,
-                        "broken_level": previous_low,
-                        "volume_spike": True,
-                    }
-                )
+        return events[-40:]
+
+    def detect_bos(self, frame: pd.DataFrame) -> List[Dict[str, object]]:
+        scored = quantify_bos(
+            frame,
+            lookback=self.config.bos_lookback,
+            break_threshold=self.config.bos_threshold,
+            volume_spike_mult=self.config.volume_spike_mult,
+        )
+
+        events: List[Dict[str, object]] = []
+        for idx in scored.index:
+            bos_value = int(scored.at[idx, "bos"])
+            if bos_value == 0:
+                continue
+
+            direction = "bullish" if bos_value > 0 else "bearish"
+            events.append(
+                {
+                    "timestamp": idx,
+                    "direction": direction,
+                    "close": float(scored.at[idx, "close"]),
+                    "broken_level": float(scored.at[idx, "bos_level"]),
+                    "volume_spike": bool(scored.at[idx, "bos_volume_spike"]),
+                }
+            )
 
         return events[-20:]
 

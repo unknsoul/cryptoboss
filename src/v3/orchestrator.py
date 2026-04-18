@@ -59,10 +59,14 @@ class IntradayScalperV3System:
         smart_money_all = self.smart_money_engine.analyze_multi_timeframe(prepared)
         smart_money_primary = smart_money_all.get("5m") or next(iter(smart_money_all.values()))
 
+        feature_row = self._build_signal_feature_row(market_structure, smart_money_primary, prepared["1m"])
+        ai_probability = self.ai_optimizer.predict_trade_success_probability(feature_row)
+
         signal = self.signal_engine.evaluate(
             market_structure=market_structure,
             smart_money=smart_money_primary,
             ltf_frame=prepared["1m"],
+            win_probability=ai_probability,
         )
 
         risk_decision = self.risk_engine.evaluate(
@@ -118,6 +122,7 @@ class IntradayScalperV3System:
             "risk": asdict(risk_decision),
             "execution": asdict(execution_report),
             "trade_id": trade_id,
+            "ai_probability": ai_probability,
             "performance": self.performance_tracker.stats(),
             "timestamp": datetime.utcnow().isoformat(),
         }
@@ -180,6 +185,39 @@ class IntradayScalperV3System:
             n_trials=n_trials,
         )
 
+    def create_rule_strategy(
+        self,
+        name: str,
+        rules: list,
+        weights: Dict[str, float],
+        buy_threshold: float = 6.0,
+        sell_threshold: float = 6.0,
+        force_trade_if_no_signal: bool = True,
+    ) -> Dict[str, Any]:
+        return self.strategy_builder.create_rule_strategy(
+            name=name,
+            rules=rules,
+            weights=weights,
+            buy_threshold=buy_threshold,
+            sell_threshold=sell_threshold,
+            force_trade_if_no_signal=force_trade_if_no_signal,
+        )
+
+    def validate_rule_strategy(
+        self,
+        strategy_name: str,
+        df: pd.DataFrame,
+        param_grid: Optional[Dict[str, list]] = None,
+        n_splits: int = 5,
+    ) -> Dict[str, Any]:
+        return self.strategy_builder.validate_rule_strategy(
+            strategy_name=strategy_name,
+            df=df,
+            backtesting_engine=self.backtesting_engine,
+            param_grid=param_grid,
+            n_splits=n_splits,
+        )
+
     @staticmethod
     def _build_market_snapshot(frame: pd.DataFrame) -> Dict[str, float]:
         latest = frame.iloc[-1]
@@ -194,3 +232,20 @@ class IntradayScalperV3System:
             "spread_pct": spread_pct,
             "expected_slippage_pct": expected_slippage_pct,
         }
+
+    @staticmethod
+    def _build_signal_feature_row(
+        market_structure: Dict[str, Any],
+        smart_money: Dict[str, Any],
+        ltf_frame: pd.DataFrame,
+    ) -> list:
+        latest = ltf_frame.iloc[-1]
+        return [
+            float(bool(market_structure.get("bos", {}).get("confirmed", False))),
+            float(bool(market_structure.get("choch", {}).get("confirmed", False))),
+            float(smart_money.get("ob_signal", 0)),
+            float(smart_money.get("fvg_signal", 0)),
+            float(bool(smart_money.get("liquidity_sweep", False))),
+            float(latest.get("volatility", 0.0)),
+            float(latest.get("momentum", 0.0)),
+        ]

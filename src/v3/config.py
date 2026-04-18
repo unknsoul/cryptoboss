@@ -23,15 +23,23 @@ class DataEngineConfig:
 
 @dataclass
 class MarketStructureConfig:
-    bos_threshold: float = 0.0005
-    volume_spike_mult: float = 1.2
+    bos_lookback: int = 20
+    bos_threshold: float = 0.0001
+    volume_spike_mult: float = 1.5
+    swing_method: str = "fractals"
+    swing_left: int = 2
+    swing_right: int = 2
     trend_method: str = "multi_timeframe"
 
 
 @dataclass
 class SmartMoneyConfig:
-    impulse_strength_threshold: float = 0.5
+    order_block_lookback: int = 10
+    order_block_impulse_multiplier: float = 2.0
+    order_block_volume_multiplier: float = 1.5
+    impulse_strength_threshold: float = 1.0
     mitigation_pending_required: bool = True
+    fvg_min_gap: float = 0.00005
     liquidity_zones: List[str] = field(default_factory=lambda: ["equal highs", "equal lows", "previous highs/lows"])
 
 
@@ -42,6 +50,21 @@ class SignalEngineConfig:
     require_price_in_ob_or_fvg: bool = True
     require_liquidity_sweep: bool = True
     confirmations: List[str] = field(default_factory=lambda: ["engulfing_candle", "momentum_spike"])
+    score_weights: Dict[str, int] = field(
+        default_factory=lambda: {
+            "bos": 2,
+            "ob_touch": 3,
+            "fvg_touch": 2,
+            "trend": 2,
+            "momentum": 1,
+        }
+    )
+    buy_threshold: int = 6
+    sell_threshold: int = 6
+    min_trade_score: int = 7
+    force_trade_if_no_signal: bool = True
+    probability_threshold: float = 0.65
+    threshold_relaxation: int = 1
 
 
 @dataclass
@@ -67,8 +90,11 @@ class ExecutionEngineConfig:
 
 @dataclass
 class StrategyBuilderConfig:
-    strategy_type: str = "rule_based + ai_assisted"
-    output: str = "custom_strategy.json"
+    strategy_type: str = "rule_composer"
+    output: str = "dynamic_strategy.json"
+    combination_method: str = "weighted_scoring"
+    validation: List[str] = field(default_factory=lambda: ["walk_forward_analysis", "out_of_sample_testing"])
+    selection: str = "robustness_score_not_profit"
     features: List[str] = field(
         default_factory=lambda: [
             "drag_and_drop_logic",
