@@ -453,7 +453,10 @@ class StrategyTester:
         if isinstance(df.index, pd.DatetimeIndex) and len(df.index) > 0:
             eq_index = pd.date_range(start=df.index[0], periods=len(equity), freq="T")
             eq_series = pd.Series(equity.values, index=eq_index)
-            monthly_returns = eq_series.resample("ME").last().pct_change().dropna()
+            try:
+                monthly_returns = eq_series.resample("ME").last().pct_change().dropna()
+            except ValueError:
+                monthly_returns = eq_series.resample("M").last().pct_change().dropna()
         else:
             monthly_returns = pd.Series([], dtype=float)
 

@@ -1,0 +1,141 @@
+system_upgrade:
+  version: 3.0_intraday_scalper
+  architecture: modular_microservices
+  modules:
+    - data_engine
+    - market_structure_engine
+    - smart_money_engine
+    - signal_engine
+    - risk_engine
+    - execution_engine
+    - strategy_builder
+    - backtesting_engine
+    - performance_tracker
+    - ai_optimizer
+
+data_engine:
+  sources:
+    - mt5
+    - binance
+    - forex_feed
+  timeframes:
+    - 1m
+    - 5m
+    - 15m
+  candles_required: 10000
+  features:
+    - ohlc
+    - tick_volume
+    - spread
+    - volatility
+    - momentum
+    - liquidity_zones
+
+market_structure_engine:
+  bos:
+    definition: break of previous swing high/low with strong momentum candle
+    conditions:
+      - close > previous_high + threshold
+      - volume_spike == true
+  choch:
+    definition: change in trend direction
+    conditions:
+      - bullish_to_bearish OR bearish_to_bullish
+      - break of internal structure
+  trend_detection:
+    method: multi_timeframe
+    logic:
+      - HTF trend + LTF confirmation
+
+smart_money_engine:
+  order_blocks:
+    detection:
+      - last bearish candle before bullish impulse
+      - last bullish candle before bearish impulse
+    validation:
+      - impulse_strength > threshold
+      - mitigation_pending == true
+  fvg:
+    definition: 3 candle imbalance
+    conditions:
+      - candle1_high < candle3_low (bullish)
+      - candle1_low > candle3_high (bearish)
+  liquidity:
+    zones:
+      - equal highs
+      - equal lows
+      - previous highs/lows
+
+signal_engine:
+  entry_logic:
+    - trend_alignment == true
+    - bos OR choch confirmed
+    - price_at_ob OR price_in_fvg
+    - liquidity_sweep == true
+  confirmation:
+    - engulfing_candle
+    - momentum_spike
+  output:
+    - BUY
+    - SELL
+    - HOLD
+
+risk_engine:
+  risk_per_trade: 1.0
+  rr_ratio: 2.0
+  stop_loss: below_ob_or_structure
+  take_profit: next_liquidity_zone
+  max_trades_per_day: 10
+  max_drawdown: 5
+
+execution_engine:
+  platform: mt5
+  order_types:
+    - market
+    - limit
+  slippage_control: true
+  spread_filter: true
+  execution_speed: high_frequency
+
+strategy_builder:
+  type: rule_based + ai_assisted
+  inputs:
+    - indicators
+    - smc_conditions
+    - risk_rules
+  output: custom_strategy.json
+  features:
+    - drag_and_drop_logic
+    - condition_chaining
+    - multi_timeframe_rules
+
+backtesting_engine:
+  data_range: last_2_years
+  metrics:
+    - win_rate
+    - profit_factor
+    - drawdown
+    - sharpe_ratio
+  simulation:
+    spread: true
+    slippage: true
+    commission: true
+
+performance_tracker:
+  logs:
+    - trade_entry
+    - trade_exit
+    - reason_for_trade
+    - strategy_used
+  dashboard: true
+  real_time_stats: true
+
+ai_optimizer:
+  models:
+    - xgboost
+    - lightgbm
+    - neural_network
+  purpose:
+    - optimize_parameters
+    - filter_false_signals
+    - predict_trade_success_probability
