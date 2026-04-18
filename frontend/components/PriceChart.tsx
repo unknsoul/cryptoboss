@@ -13,7 +13,8 @@ import {
     CartesianGrid,
     Tooltip,
     ResponsiveContainer,
-    Legend,
+    ReferenceArea,
+    ReferenceLine,
 } from 'recharts';
 
 interface PriceData {
@@ -25,27 +26,92 @@ interface PriceData {
     volume: number;
 }
 
+interface OBOverlay {
+    id: string;
+    type: 'bullish' | 'bearish';
+    status: string;
+    top: number;
+    bottom: number;
+}
+
+interface FVGOverlay {
+    id: string;
+    type: 'bullish' | 'bearish';
+    status: string;
+    top: number;
+    bottom: number;
+}
+
+interface StructureOverlay {
+    id: string;
+    type: string;
+    broken_level: number;
+    direction: 'bullish' | 'bearish';
+}
+
+interface LiquidityOverlay {
+    id: string;
+    type: 'buyside' | 'sellside';
+    status: string;
+    price: number;
+}
+
+interface SMCOverlayState {
+    order_blocks: OBOverlay[];
+    fvgs: FVGOverlay[];
+    structure: StructureOverlay[];
+    liquidity: LiquidityOverlay[];
+}
+
 export default function PriceChart() {
     const [priceData, setPriceData] = useState<PriceData[]>([]);
     const [timeframe, setTimeframe] = useState('1h');
     const [loading, setLoading] = useState(true);
+    const [overlays, setOverlays] = useState<SMCOverlayState>({
+        order_blocks: [],
+        fvgs: [],
+        structure: [],
+        liquidity: [],
+    });
 
     useEffect(() => {
-        // Fetch price data from API
         const fetchPriceData = async () => {
             try {
-                const response = await fetch(`${API_URL}/api/prices?timeframe=${timeframe}`);
-                const result = await response.json();
-                // Handle wrapped response format
-                const data = result.data || result;
-                if (Array.isArray(data)) {
-                    setPriceData(data);
+                const [pricesResponse, smcResponse] = await Promise.all([
+                    fetch(`${API_URL}/api/prices?timeframe=${timeframe}&limit=240`),
+                    fetch(`${API_URL}/api/v2/smc/state?symbol=BTC%2FUSDT&timeframe=${timeframe}`),
+                ]);
+
+                const pricesJson = await pricesResponse.json();
+                const pricesPayload = pricesJson.data || pricesJson;
+                if (Array.isArray(pricesPayload)) {
+                    setPriceData(pricesPayload as PriceData[]);
+                } else {
+                    setPriceData([]);
                 }
+
+                if (smcResponse.ok) {
+                    const smcJson = await smcResponse.json();
+                    const smcPayload = smcJson.data || smcJson;
+                    const tfState = smcPayload.smc_state?.[timeframe] || {
+                        order_blocks: [],
+                        fvgs: [],
+                        structure: [],
+                        liquidity: [],
+                    };
+                    setOverlays({
+                        order_blocks: tfState.order_blocks || [],
+                        fvgs: tfState.fvgs || [],
+                        structure: tfState.structure || [],
+                        liquidity: tfState.liquidity || [],
+                    });
+                }
+
                 setLoading(false);
             } catch (error) {
                 console.error('Failed to fetch price data:', error);
-                // NO MOCK DATA - show waiting state
                 setPriceData([]);
+                setOverlays({ order_blocks: [], fvgs: [], structure: [], liquidity: [] });
                 setLoading(false);
             }
         };
@@ -59,6 +125,8 @@ export default function PriceChart() {
     const priceChange = priceData.length > 1
         ? ((currentPrice - priceData[0].close) / priceData[0].close) * 100
         : 0;
+    const xStart = priceData[0]?.timestamp;
+    const xEnd = priceData[priceData.length - 1]?.timestamp;
 
     return (
         <div className="card">
@@ -121,6 +189,54 @@ export default function PriceChart() {
                             }}
                             labelStyle={{ color: '#e8eaed' }}
                         />
+
+                        {/* SMC Overlay Layer */}
+                        {xStart && xEnd && overlays.order_blocks.slice(0, 4).map((ob) => (
+                            <ReferenceArea
+                                key={`ob-${ob.id}`}
+                                x1={xStart}
+                                x2={xEnd}
+                                y1={ob.bottom}
+                                y2={ob.top}
+                                fill={ob.type === 'bullish' ? '#4a9268' : '#a65454'}
+                                fillOpacity={0.08}
+                                strokeOpacity={0}
+                            />
+                        ))}
+
+                        {xStart && xEnd && overlays.fvgs.slice(0, 4).map((fvg) => (
+                            <ReferenceArea
+                                key={`fvg-${fvg.id}`}
+                                x1={xStart}
+                                x2={xEnd}
+                                y1={fvg.bottom}
+                                y2={fvg.top}
+                                fill={fvg.type === 'bullish' ? '#5b7a9d' : '#c4a052'}
+                                fillOpacity={0.07}
+                                strokeOpacity={0}
+                            />
+                        ))}
+
+                        {overlays.structure.slice(0, 5).map((structure) => (
+                            <ReferenceLine
+                                key={`structure-${structure.id}`}
+                                y={structure.broken_level}
+                                stroke={structure.direction === 'bullish' ? '#4a9268' : '#a65454'}
+                                strokeDasharray="3 3"
+                                strokeOpacity={0.8}
+                            />
+                        ))}
+
+                        {overlays.liquidity.slice(0, 6).map((level) => (
+                            <ReferenceLine
+                                key={`liq-${level.id}`}
+                                y={level.price}
+                                stroke={level.type === 'buyside' ? '#a65454' : '#4a9268'}
+                                strokeDasharray="2 5"
+                                strokeOpacity={0.45}
+                            />
+                        ))}
+
                         <Line
                             type="monotone"
                             dataKey="close"

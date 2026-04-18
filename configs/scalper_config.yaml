@@ -1,0 +1,36 @@
+scalper:
+  entry_timeframe: '5m'
+  mid_timeframe: '15m'
+  bias_timeframe: '1h'
+  max_risk_pct: 0.005
+  min_rr: 1.5
+  min_confluence: 0.60
+  atr_sl_mult: 0.8
+  session_filter: true
+  kill_zone_only: false
+  max_positions: 3
+  partial_exit_pct: 0.5
+  tp_ratios: [1.5, 2.5, 4.0]
+  symbols:
+    - 'BTC/USDT'
+    - 'ETH/USDT'
+    - 'SOL/USDT'
+    - 'BNB/USDT'
+
+smc:
+  impulse_multiplier: 1.5
+  min_ob_strength: 0.3
+  min_fvg_atr_ratio: 0.3
+  swing_lookback: 5
+  trend_lookback: 3
+  liquidity_equality_threshold: 0.001
+  stop_hunt_reversal_ratio: 1.5
+  use_body_only_ob: false
+
+backtester:
+  initial_capital: 10000
+  maker_fee: 0.0002
+  taker_fee: 0.0004
+  slippage_pct: 0.0001
+  partial_exits: true
+  partial_exit_pcts: [0.5, 0.3, 0.2]

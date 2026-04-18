@@ -20,6 +20,9 @@ from pathlib import Path
 from enum import Enum
 import sys
 
+import numpy as np
+import pandas as pd
+
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -108,6 +111,26 @@ try:
 except ImportError as e:
     MARKET_DATA_AVAILABLE = False
     logging.warning(f"Market data service not available: {e}")
+
+# v12.0: Import SMC/scalper/builder/tester stack
+try:
+    from src.smc.smc_engine import SMCEngine
+    from src.strategies.base_strategy import StrategyConfig
+    from src.strategies.intraday_scalper import IntradayScalper
+    from src.strategies.strategy_builder import BuiltStrategy, ConditionOperator, LogicGate, StrategyBuilder
+    from src.strategies.strategy_tester import StrategyTester
+    V12_AVAILABLE = True
+except ImportError as e:
+    V12_AVAILABLE = False
+    BuiltStrategy = Any  # type: ignore
+    ConditionOperator = Any  # type: ignore
+    LogicGate = Any  # type: ignore
+    StrategyBuilder = Any  # type: ignore
+    StrategyTester = Any  # type: ignore
+    SMCEngine = Any  # type: ignore
+    StrategyConfig = Any  # type: ignore
+    IntradayScalper = Any  # type: ignore
+    logging.warning(f"v12 modules not available: {e}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Dashboard")
@@ -418,6 +441,441 @@ class DashboardState:
         return (self.winning_trades / self.total_trades) * 100
 
 state = DashboardState()
+
+
+# === v12 Runtime Objects & Helpers ===
+
+_TIMEFRAME_RULES = {
+    "1m": "1min",
+    "3m": "3min",
+    "5m": "5min",
+    "15m": "15min",
+    "30m": "30min",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1d",
+}
+
+
+def _timeframe_rule(timeframe: str) -> str:
+    return _TIMEFRAME_RULES.get(timeframe.lower(), "5min")
+
+
+def _synthesize_ohlcv(limit: int, base_price: float) -> pd.DataFrame:
+    rows = max(limit, 120)
+    base = base_price if base_price and base_price > 0 else 65000.0
+    timestamps = pd.date_range(end=pd.Timestamp.utcnow(), periods=rows, freq="1min")
+
+    closes = [base]
+    for _ in range(rows - 1):
+        closes.append(max(1.0, closes[-1] * (1.0 + random.gauss(0.0, 0.0015))))
+
+    data = []
+    for idx in range(rows):
+        close = closes[idx]
+        prev = closes[idx - 1] if idx > 0 else close
+        open_price = prev
+        wick = abs(close - open_price) * 0.3 + close * 0.0005
+        high = max(open_price, close) + wick
+        low = max(0.0, min(open_price, close) - wick)
+        volume = abs(close - open_price) * random.uniform(80.0, 200.0) + random.uniform(50.0, 400.0)
+        data.append(
+            {
+                "timestamp": timestamps[idx],
+                "open": float(open_price),
+                "high": float(high),
+                "low": float(low),
+                "close": float(close),
+                "volume": float(volume),
+            }
+        )
+
+    frame = pd.DataFrame(data).set_index("timestamp")
+    return frame
+
+
+def _price_history_ohlcv(limit: int) -> pd.DataFrame:
+    if not state.price_history:
+        return _synthesize_ohlcv(limit=limit, base_price=state.current_price)
+
+    parsed = []
+    for item in state.price_history[-max(limit * 6, 240):]:
+        ts_raw = item.get("time") or item.get("timestamp")
+        ts = pd.to_datetime(ts_raw, errors="coerce", utc=True)
+        price = float(item.get("price", 0.0) or 0.0)
+        if pd.isna(ts) or price <= 0:
+            continue
+        parsed.append((ts, price))
+
+    if len(parsed) < 20:
+        return _synthesize_ohlcv(limit=limit, base_price=state.current_price)
+
+    parsed.sort(key=lambda row: row[0])
+    history_df = pd.DataFrame(parsed, columns=["timestamp", "price"]).drop_duplicates("timestamp")
+    history_df.set_index("timestamp", inplace=True)
+    history_df = history_df.resample("1min").last().ffill().dropna()
+
+    if history_df.empty:
+        return _synthesize_ohlcv(limit=limit, base_price=state.current_price)
+
+    history_df["open"] = history_df["price"].shift(1).fillna(history_df["price"])
+    history_df["close"] = history_df["price"]
+    spread = (history_df["close"] - history_df["open"]).abs()
+    baseline = history_df["close"] * 0.0006
+    history_df["high"] = history_df[["open", "close"]].max(axis=1) + spread * 0.25 + baseline
+    history_df["low"] = history_df[["open", "close"]].min(axis=1) - spread * 0.25 - baseline
+    history_df["volume"] = (spread * 120.0 + 120.0).clip(lower=10.0)
+
+    ohlcv = history_df[["open", "high", "low", "close", "volume"]].tail(max(limit, 120))
+    ohlcv.index = pd.DatetimeIndex(ohlcv.index)
+    return ohlcv
+
+
+async def fetch_ohlcv(symbol: str = "BTC/USDT", timeframe: str = "5m", limit: int = 500) -> pd.DataFrame:
+    _ = symbol
+    one_min = _price_history_ohlcv(limit=max(limit * 5, 240))
+
+    rule = _timeframe_rule(timeframe)
+    if rule == "1min":
+        frame = one_min
+    else:
+        frame = (
+            one_min.resample(rule)
+            .agg(
+                {
+                    "open": "first",
+                    "high": "max",
+                    "low": "min",
+                    "close": "last",
+                    "volume": "sum",
+                }
+            )
+            .dropna()
+        )
+
+    frame = frame.tail(limit).copy()
+    frame.index = pd.DatetimeIndex(frame.index)
+    return frame
+
+
+async def fetch_multi_tf_data(symbol: str, timeframes: List[str], limit: int = 500) -> Dict[str, pd.DataFrame]:
+    output: Dict[str, pd.DataFrame] = {}
+    for timeframe in timeframes:
+        output[timeframe] = await fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=limit)
+    return output
+
+
+def _serialize_setup(setup) -> Dict[str, Any]:
+    return {
+        "id": setup.setup_id,
+        "type": setup.setup_type.value,
+        "direction": setup.direction,
+        "timeframe": setup.timeframe,
+        "confidence": setup.confidence,
+        "rr": setup.risk_reward,
+        "entry": setup.entry_price,
+        "sl": setup.stop_loss,
+        "tp1": setup.take_profit_1,
+        "tp2": setup.take_profit_2,
+        "tp3": setup.take_profit_3,
+        "components": setup.components,
+        "notes": setup.notes,
+    }
+
+
+def _series_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return (100 - (100 / (1 + rs))).fillna(50)
+
+
+def _series_atr(df: pd.DataFrame, period: int = 14) -> float:
+    tr = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - df["close"].shift()).abs(),
+            (df["low"] - df["close"].shift()).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr = tr.rolling(period).mean().iloc[-1]
+    if pd.isna(atr) or float(atr) <= 0:
+        return float(max(df["close"].iloc[-1] * 0.001, 0.01))
+    return float(atr)
+
+
+def _compare_values(
+    operator: str,
+    left: Any,
+    right: Any,
+    prev_left: Optional[Any] = None,
+    prev_right: Optional[Any] = None,
+) -> bool:
+    if operator == ">":
+        return float(left) > float(right)
+    if operator == "<":
+        return float(left) < float(right)
+    if operator == ">=":
+        return float(left) >= float(right)
+    if operator == "<=":
+        return float(left) <= float(right)
+    if operator == "==":
+        return left == right
+    if operator == "cross_above":
+        if prev_left is None or prev_right is None:
+            return False
+        return float(prev_left) <= float(prev_right) and float(left) > float(right)
+    if operator == "cross_below":
+        if prev_left is None or prev_right is None:
+            return False
+        return float(prev_left) >= float(prev_right) and float(left) < float(right)
+    return False
+
+
+def _evaluate_condition(condition, df_slice: pd.DataFrame, smc_context: Dict[str, Any]) -> bool:
+    indicator = condition.indicator.value
+    params = condition.params or {}
+    operator = condition.operator.value
+    threshold = condition.threshold
+
+    close = df_slice["close"]
+    high = df_slice["high"]
+    low = df_slice["low"]
+    volume = df_slice["volume"]
+    current_price = float(close.iloc[-1])
+
+    if indicator == "ema":
+        fast = int(params.get("fast", params.get("period", 9)))
+        slow = int(params.get("slow", 21))
+        fast_series = close.ewm(span=fast, adjust=False).mean()
+        slow_series = close.ewm(span=slow, adjust=False).mean()
+        if len(fast_series) < 2 or len(slow_series) < 2:
+            return False
+        if operator in ("cross_above", "cross_below"):
+            right = float(slow_series.iloc[-1])
+        else:
+            right = float(threshold) if isinstance(threshold, (int, float)) else float(slow_series.iloc[-1])
+        return _compare_values(
+            operator,
+            float(fast_series.iloc[-1]),
+            right,
+            float(fast_series.iloc[-2]),
+            float(slow_series.iloc[-2]),
+        )
+
+    if indicator == "rsi":
+        period = int(params.get("period", 14))
+        rsi_series = _series_rsi(close, period)
+        if len(rsi_series) < 2:
+            return False
+        return _compare_values(
+            operator,
+            float(rsi_series.iloc[-1]),
+            float(threshold),
+            float(rsi_series.iloc[-2]),
+            float(threshold),
+        )
+
+    if indicator == "volume_ma":
+        period = int(params.get("period", 20))
+        vol_ma = volume.rolling(period).mean()
+        if len(vol_ma) < 2 or pd.isna(vol_ma.iloc[-1]) or vol_ma.iloc[-1] == 0:
+            return False
+        ratio = float(volume.iloc[-1] / vol_ma.iloc[-1])
+        return _compare_values(operator, ratio, float(threshold), ratio, float(threshold))
+
+    if indicator == "vwap":
+        typical = (high + low + close) / 3.0
+        vwap = (typical * volume).cumsum() / volume.cumsum().replace(0, np.nan)
+        vwap = vwap.fillna(close)
+        if operator == "in_zone":
+            if isinstance(threshold, dict):
+                band = float(threshold.get("band", 0.002))
+            else:
+                band = 0.002
+            return abs(current_price - float(vwap.iloc[-1])) / max(current_price, 1e-9) <= band
+        return _compare_values(operator, current_price, float(vwap.iloc[-1]), float(close.iloc[-2]), float(vwap.iloc[-2]))
+
+    smc_state = smc_context.get("state", {})
+    entry_tf = smc_context.get("entry_timeframe", "5m")
+    tf_state = smc_state.get(entry_tf, {})
+
+    if indicator == "order_block":
+        desired = params.get("type", "bullish")
+        for ob in tf_state.get("order_blocks", []):
+            if ob.get("type") != desired:
+                continue
+            if ob.get("status") not in ("active", "tested"):
+                continue
+            if operator == "in_zone":
+                if float(ob["bottom"]) <= current_price <= float(ob["top"]):
+                    return True
+            elif operator == "==":
+                return bool(threshold)
+        return False
+
+    if indicator == "fvg":
+        desired = params.get("type", "bullish")
+        for fvg in tf_state.get("fvgs", []):
+            if fvg.get("type") != desired:
+                continue
+            if fvg.get("status") == "filled":
+                continue
+            if operator == "in_zone":
+                if float(fvg["bottom"]) <= current_price <= float(fvg["top"]):
+                    return True
+            elif operator == "==":
+                return bool(threshold)
+        return False
+
+    if indicator in ("bos", "choch"):
+        direction = params.get("direction", "bullish")
+        key = "is_bos" if indicator == "bos" else "is_choch"
+        has_event = any(item.get(key) and item.get("direction") == direction for item in tf_state.get("structure", [])[:10])
+        if operator == "==":
+            return has_event == bool(threshold)
+        return has_event
+
+    if indicator == "liquidity":
+        levels = tf_state.get("liquidity", [])
+        if not levels:
+            return False
+        nearest = min(levels, key=lambda item: abs(float(item.get("price", 0.0)) - current_price))
+        if operator == "in_zone":
+            return abs(float(nearest.get("price", 0.0)) - current_price) / max(current_price, 1e-9) <= 0.002
+        if operator == "==":
+            return bool(threshold)
+        return True
+
+    return False
+
+
+def _evaluate_group(group, df_slice: pd.DataFrame, smc_context: Dict[str, Any]) -> bool:
+    if group is None or not group.conditions:
+        return False
+
+    results = [_evaluate_condition(condition, df_slice, smc_context) for condition in group.conditions]
+    if group.gate == LogicGate.AND:
+        return all(results)
+    return any(results)
+
+
+def _compile_strategy_signal_fn(strategy: BuiltStrategy):
+    engine = SMCEngine(timeframes=["1h", "15m", strategy.timeframe])
+
+    def signal_fn(df_slice: pd.DataFrame) -> Dict[str, Any]:
+        if df_slice is None or len(df_slice) < 60:
+            return {"action": "HOLD"}
+
+        close = float(df_slice["close"].iloc[-1])
+        atr = _series_atr(df_slice)
+        data = {
+            "1h": df_slice,
+            "15m": df_slice,
+            strategy.timeframe: df_slice,
+        }
+        setups = engine.analyze(data)
+        state_dict = engine.get_state_dict()
+        smc_context = {
+            "state": state_dict,
+            "setups": setups,
+            "entry_timeframe": strategy.timeframe,
+        }
+
+        long_ok = _evaluate_group(strategy.entry_long, df_slice, smc_context)
+        short_ok = _evaluate_group(strategy.entry_short, df_slice, smc_context)
+
+        if long_ok and short_ok:
+            return {"action": "HOLD"}
+        if not long_ok and not short_ok:
+            return {"action": "HOLD"}
+
+        direction = "long" if long_ok else "short"
+
+        if direction == "long":
+            if strategy.exit_config.stop_loss_type in ("atr", "ob_bottom", "swing_low"):
+                stop = close - atr * float(strategy.exit_config.stop_loss_value)
+            else:
+                stop = close * (1.0 - float(strategy.exit_config.stop_loss_value) / 100.0)
+            risk = close - stop
+        else:
+            if strategy.exit_config.stop_loss_type in ("atr", "ob_bottom", "swing_low"):
+                stop = close + atr * float(strategy.exit_config.stop_loss_value)
+            else:
+                stop = close * (1.0 + float(strategy.exit_config.stop_loss_value) / 100.0)
+            risk = stop - close
+
+        if risk <= 0:
+            return {"action": "HOLD"}
+
+        rr = (
+            float(strategy.exit_config.take_profit_value)
+            if strategy.exit_config.take_profit_type == "rr"
+            else 1.5
+        )
+        tp2_rr = float(strategy.exit_config.tp2_rr) if strategy.exit_config.tp2_rr else rr * 1.6
+        tp3_rr = float(strategy.exit_config.tp3_rr) if strategy.exit_config.tp3_rr else rr * 2.5
+
+        if direction == "long":
+            tp1 = close + risk * rr
+            tp2 = close + risk * tp2_rr
+            tp3 = close + risk * tp3_rr
+            action = "BUY"
+        else:
+            tp1 = close - risk * rr
+            tp2 = close - risk * tp2_rr
+            tp3 = close - risk * tp3_rr
+            action = "SELL"
+
+        position_size = (10000.0 * strategy.risk_config.max_risk_pct) / risk
+
+        return {
+            "action": action,
+            "entry": close,
+            "sl": float(stop),
+            "tp1": float(tp1),
+            "tp2": float(tp2),
+            "tp3": float(tp3),
+            "size": float(position_size),
+            "confidence": 0.7,
+            "setup_type": setups[0].setup_type.value if setups else "custom_strategy",
+            "components": setups[0].components if setups else {},
+        }
+
+    return signal_fn
+
+
+if V12_AVAILABLE:
+    v12_builder = StrategyBuilder()
+    v12_tester = StrategyTester()
+    v12_scalper = IntradayScalper(
+        StrategyConfig(
+            strategy_id="intraday_scalper_v1",
+            version="12.0",
+            symbol="BTC/USDT",
+            min_confidence=0.55,
+            metadata={
+                "entry_timeframe": "5m",
+                "mid_timeframe": "15m",
+                "bias_timeframe": "1h",
+                "max_risk_pct": 0.005,
+                "min_rr": 1.5,
+                "min_confluence": 0.6,
+                "atr_sl_mult": 0.8,
+                "session_filter": True,
+                "kill_zone_only": False,
+                "max_positions": 3,
+                "partial_exit_pct": 0.5,
+                "tp_ratios": [1.5, 2.5, 4.0],
+            },
+        )
+    )
+else:
+    v12_builder = None
+    v12_tester = None
+    v12_scalper = None
 
 
 # === WebSocket Manager ===
@@ -1103,6 +1561,24 @@ async def toggle_kill_switch(active: bool = True, reason: str = "Manual activati
 SUPPORTED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
 
 
+@app.get("/api/prices")
+async def get_prices(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int = 200):
+    """Return OHLCV candles for chart widgets and SMC overlays."""
+    frame = await fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=min(max(limit, 20), 1000))
+    payload = [
+        {
+            "timestamp": index.isoformat(),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row["volume"]),
+        }
+        for index, row in frame.iterrows()
+    ]
+    return wrap_response(payload, DataSourceTag.DERIVED)
+
+
 @app.get("/api/prices/live")
 async def get_live_prices():
     """
@@ -1348,6 +1824,298 @@ async def get_strategies():
             }
         ]
     }
+
+
+@app.get("/api/v2/smc/state")
+async def get_smc_state(symbol: str = "BTC/USDT", timeframe: str = "5m", limit: int = 400):
+    """Return full SMC state and top setups for the requested symbol."""
+    if not V12_AVAILABLE:
+        raise HTTPException(status_code=503, detail="v12 SMC modules are unavailable")
+
+    requested_tf = timeframe.lower()
+    timeframes = ["1h", "15m", requested_tf]
+    engine = SMCEngine(timeframes=timeframes)
+    data = await fetch_multi_tf_data(symbol=symbol, timeframes=timeframes, limit=limit)
+    setups = engine.analyze(data)
+    state_dict = engine.get_state_dict()
+
+    return wrap_response(
+        {
+            "symbol": symbol,
+            "timestamp": pd.Timestamp.utcnow().isoformat(),
+            "smc_state": state_dict,
+            "setups": [_serialize_setup(setup) for setup in setups[:10]],
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v2/smc/order-blocks")
+async def get_order_blocks(symbol: str = "BTC/USDT", timeframe: str = "15m", status: str = "active"):
+    """Return filtered order blocks for a timeframe."""
+    if not V12_AVAILABLE:
+        raise HTTPException(status_code=503, detail="v12 SMC modules are unavailable")
+
+    tf = timeframe.lower()
+    engine = SMCEngine(timeframes=["1h", "15m", tf])
+    data = await fetch_multi_tf_data(symbol=symbol, timeframes=engine.timeframes, limit=320)
+    engine.analyze(data)
+    blocks = engine.get_state_dict().get(tf, {}).get("order_blocks", [])
+
+    if status:
+        blocks = [item for item in blocks if item.get("status") == status]
+
+    return wrap_response(
+        {
+            "symbol": symbol,
+            "timeframe": tf,
+            "count": len(blocks),
+            "order_blocks": blocks,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v2/smc/fvg")
+async def get_fvgs(symbol: str = "BTC/USDT", timeframe: str = "15m"):
+    """Return FVG state for a timeframe."""
+    if not V12_AVAILABLE:
+        raise HTTPException(status_code=503, detail="v12 SMC modules are unavailable")
+
+    tf = timeframe.lower()
+    engine = SMCEngine(timeframes=["1h", "15m", tf])
+    data = await fetch_multi_tf_data(symbol=symbol, timeframes=engine.timeframes, limit=320)
+    engine.analyze(data)
+    fvgs = engine.get_state_dict().get(tf, {}).get("fvgs", [])
+
+    return wrap_response(
+        {
+            "symbol": symbol,
+            "timeframe": tf,
+            "count": len(fvgs),
+            "fvgs": fvgs,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v2/smc/structure")
+async def get_structure(symbol: str = "BTC/USDT", timeframe: str = "15m"):
+    """Return BOS/CHoCH structure timeline for a timeframe."""
+    if not V12_AVAILABLE:
+        raise HTTPException(status_code=503, detail="v12 SMC modules are unavailable")
+
+    tf = timeframe.lower()
+    engine = SMCEngine(timeframes=["1h", "15m", tf])
+    data = await fetch_multi_tf_data(symbol=symbol, timeframes=engine.timeframes, limit=320)
+    engine.analyze(data)
+
+    structure = engine.get_state_dict().get(tf, {}).get("structure", [])
+    trend = engine.get_state_dict().get(tf, {}).get("trend", "unknown")
+
+    return wrap_response(
+        {
+            "symbol": symbol,
+            "timeframe": tf,
+            "trend": trend,
+            "count": len(structure),
+            "structure": structure,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v2/scalper/live")
+async def get_scalper_live(symbol: str = "BTC/USDT", account_balance: float = 10000.0):
+    """Return live intraday scalper signal and current SMC market analysis."""
+    if not V12_AVAILABLE or v12_scalper is None:
+        raise HTTPException(status_code=503, detail="v12 scalper module is unavailable")
+
+    timeframes = [v12_scalper.bias_timeframe, v12_scalper.mid_timeframe, v12_scalper.entry_timeframe]
+    data = await fetch_multi_tf_data(symbol=symbol, timeframes=timeframes, limit=400)
+    signal = v12_scalper.generate_multi_timeframe_signal(data=data, account_balance=account_balance)
+    analysis = v12_scalper.analyze_current_market(data=data)
+
+    return wrap_response(
+        {
+            "symbol": symbol,
+            "signal": {
+                "action": signal.action,
+                "reason": signal.reason,
+                "confidence": signal.confidence,
+                "size": signal.size,
+                "price": signal.price,
+                "stop_loss": signal.stop_loss,
+                "take_profit": signal.take_profit,
+                "metadata": signal.metadata,
+            },
+            "analysis": analysis,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v2/strategies/presets")
+async def list_v2_presets():
+    """Return built-in StrategyBuilder presets."""
+    if not V12_AVAILABLE or v12_builder is None:
+        raise HTTPException(status_code=503, detail="v12 strategy builder is unavailable")
+
+    return wrap_response(
+        {
+            "presets": list(StrategyBuilder.PRESETS.keys()),
+            "details": StrategyBuilder.PRESETS,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.post("/api/v2/strategies/create")
+async def create_v2_strategy(payload: Dict[str, Any]):
+    """Create a custom strategy definition via StrategyBuilder."""
+    if not V12_AVAILABLE or v12_builder is None:
+        raise HTTPException(status_code=503, detail="v12 strategy builder is unavailable")
+
+    name = payload.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="Field 'name' is required")
+
+    strategy_id = v12_builder.new_strategy(
+        name=name,
+        symbol=payload.get("symbol", "BTC/USDT"),
+        timeframe=payload.get("timeframe", "5m"),
+        description=payload.get("description", ""),
+    )
+
+    return wrap_response({"strategy_id": strategy_id}, DataSourceTag.DERIVED)
+
+
+@app.post("/api/v2/strategies/load-preset")
+async def load_v2_preset(preset: str, symbol: str = "BTC/USDT", timeframe: str = "5m"):
+    """Create a strategy instance from a preset template."""
+    if not V12_AVAILABLE or v12_builder is None:
+        raise HTTPException(status_code=503, detail="v12 strategy builder is unavailable")
+
+    try:
+        strategy_id = v12_builder.load_preset(preset, symbol=symbol, timeframe=timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    strategy = v12_builder.get_strategy(strategy_id)
+    return wrap_response(
+        {"strategy_id": strategy_id, "strategy": json.loads(strategy.to_json())},
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/v2/strategies")
+async def list_v2_strategies():
+    """List all strategies currently loaded in StrategyBuilder."""
+    if not V12_AVAILABLE or v12_builder is None:
+        raise HTTPException(status_code=503, detail="v12 strategy builder is unavailable")
+    return wrap_response({"strategies": v12_builder.list_strategies()}, DataSourceTag.DERIVED)
+
+
+@app.post("/api/v2/strategies/{strategy_id}/backtest")
+async def backtest_v2_strategy(strategy_id: str, payload: Dict[str, Any]):
+    """Backtest a built strategy with detailed metrics and Monte Carlo analysis."""
+    if not V12_AVAILABLE or v12_builder is None or v12_tester is None:
+        raise HTTPException(status_code=503, detail="v12 tester stack is unavailable")
+
+    try:
+        strategy = v12_builder.get_strategy(strategy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found") from exc
+
+    limit = int(payload.get("limit", 1200))
+    df = await fetch_ohlcv(symbol=strategy.symbol, timeframe=strategy.timeframe, limit=limit)
+
+    signal_fn = _compile_strategy_signal_fn(strategy)
+    result = v12_tester.run(
+        df=df,
+        signal_fn=signal_fn,
+        strategy_name=strategy.name,
+        strategy_id=strategy_id,
+        symbol=strategy.symbol,
+        timeframe=strategy.timeframe,
+    )
+
+    monte_carlo = v12_tester.run_monte_carlo(
+        result,
+        n_simulations=int(payload.get("n_simulations", 500)),
+    )
+
+    trades_payload = [
+        {
+            "id": trade.trade_id,
+            "direction": trade.direction,
+            "entry_time": str(trade.entry_time),
+            "exit_time": str(trade.exit_time),
+            "entry": trade.entry_price,
+            "exit": trade.exit_price,
+            "net_pnl": round(trade.net_pnl, 4),
+            "pnl_pct": round(trade.pnl_pct, 2),
+            "exit_reason": trade.exit_reason,
+            "rr": round(trade.risk_reward_achieved, 2),
+        }
+        for trade in result.trades
+    ]
+
+    monthly_returns = {str(key): float(value) for key, value in result.monthly_returns.to_dict().items()}
+
+    return wrap_response(
+        {
+            "summary": result.to_summary_dict(),
+            "trades": trades_payload,
+            "equity_curve": result.equity_curve.tolist(),
+            "drawdown": result.drawdown_series.tolist(),
+            "monthly_returns": monthly_returns,
+            "monte_carlo": monte_carlo,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.post("/api/v2/strategies/{strategy_id}/walk-forward")
+async def walk_forward_v2_strategy(strategy_id: str, payload: Dict[str, Any]):
+    """Run walk-forward optimization on a built strategy."""
+    if not V12_AVAILABLE or v12_builder is None or v12_tester is None:
+        raise HTTPException(status_code=503, detail="v12 tester stack is unavailable")
+
+    try:
+        base_strategy = v12_builder.get_strategy(strategy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found") from exc
+
+    param_grid = payload.get("param_grid", {"take_profit_value": [1.2, 1.5, 2.0], "stop_loss_value": [0.8, 1.0, 1.2]})
+    splits = int(payload.get("n_splits", 5))
+    limit = int(payload.get("limit", 2000))
+
+    df = await fetch_ohlcv(symbol=base_strategy.symbol, timeframe=base_strategy.timeframe, limit=limit)
+
+    def signal_fn_factory(params: Dict[str, Any]):
+        strategy_copy = BuiltStrategy.from_json(base_strategy.to_json())
+        for key, value in params.items():
+            if hasattr(strategy_copy.exit_config, key):
+                setattr(strategy_copy.exit_config, key, value)
+            elif hasattr(strategy_copy.risk_config, key):
+                setattr(strategy_copy.risk_config, key, value)
+            elif hasattr(strategy_copy.filter_config, key):
+                setattr(strategy_copy.filter_config, key, value)
+        return _compile_strategy_signal_fn(strategy_copy)
+
+    wf_results = v12_tester.run_walk_forward(
+        df=df,
+        signal_fn_factory=signal_fn_factory,
+        param_grid=param_grid,
+        n_splits=splits,
+        strategy_name=base_strategy.name,
+        strategy_id=base_strategy.strategy_id,
+        symbol=base_strategy.symbol,
+        timeframe=base_strategy.timeframe,
+    )
+
+    return wrap_response({"walk_forward": wf_results}, DataSourceTag.DERIVED)
 
 
 @app.post("/api/engine/start")

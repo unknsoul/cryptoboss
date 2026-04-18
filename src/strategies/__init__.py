@@ -1,5 +1,5 @@
 """
-Strategies Module - v11.0 Production-Grade
+Strategies Module - v12.0 Professional SMC Scalper
 
 All trading strategies with TradeIntent integration for the
 production pipeline.
@@ -10,6 +10,7 @@ Exports:
 - StrategyIntentAdapter for signal conversion
 - DCAStrategy, GridTradingStrategy, MarketMakingStrategy
 - RegimeDetector, StrategySelector, MarketRegime
+- IntradayScalper, StrategyBuilder, StrategyTester
 """
 
 # v11.0 Base classes
@@ -33,6 +34,10 @@ from .intent_adapter import (
 from .dca_strategy import DCAStrategy, DCADeal
 from .grid_strategy import GridTradingStrategy, GridConfig, GridLevel
 from .market_making import MarketMakingStrategy
+from .intraday_scalper import IntradayScalper
+from .strategy_builder import StrategyBuilder
+from .strategy_tester import StrategyTester
+from .session_manager_pro import SessionManagerPro, SessionWindow
 
 # Regime detection and selection
 from .regime_selection import RegimeDetector, StrategySelector, MarketRegime
@@ -58,6 +63,11 @@ __all__ = [
     'GridConfig',
     'GridLevel',
     'MarketMakingStrategy',
+    'IntradayScalper',
+    'StrategyBuilder',
+    'StrategyTester',
+    'SessionManagerPro',
+    'SessionWindow',
     
     # Regime
     'RegimeDetector',
@@ -65,4 +75,4 @@ __all__ = [
     'MarketRegime',
 ]
 
-__version__ = "11.0"
+__version__ = "12.0"

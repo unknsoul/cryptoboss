@@ -17,6 +17,8 @@ interface Strategy {
 export default function StrategyControls() {
     const [strategies, setStrategies] = useState<Strategy[]>([]);
     const [loading, setLoading] = useState(true);
+    const [scalperMode, setScalperMode] = useState(false);
+    const [smcMode, setSmcMode] = useState<'balanced' | 'aggressive' | 'conservative'>('balanced');
 
     useEffect(() => {
         const fetchStrategies = async () => {
@@ -71,6 +73,40 @@ export default function StrategyControls() {
     return (
         <div className="card">
             <h2 className="text-xl font-bold mb-4">Strategy Controls</h2>
+
+            <div className="mb-4 border border-border rounded p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <div className="font-medium text-sm">Scalper Mode</div>
+                        <div className="text-text-secondary text-xs">Enable fast intraday execution profile</div>
+                    </div>
+                    <button
+                        onClick={() => setScalperMode((value) => !value)}
+                        className={`px-3 py-1 rounded text-sm font-medium transition-colors ${scalperMode
+                            ? 'bg-accent-green text-white hover:bg-accent-green/80'
+                            : 'bg-bg-tertiary text-text-secondary hover:bg-bg-tertiary/80'
+                            }`}
+                    >
+                        {scalperMode ? 'ON' : 'OFF'}
+                    </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                    <div>
+                        <div className="font-medium text-sm">SMC Mode Selector</div>
+                        <div className="text-text-secondary text-xs">Adjust confluence strictness for SMC entries</div>
+                    </div>
+                    <select
+                        value={smcMode}
+                        onChange={(event) => setSmcMode(event.target.value as 'balanced' | 'aggressive' | 'conservative')}
+                        className="bg-bg-tertiary border border-border rounded px-2 py-1 text-sm"
+                    >
+                        <option value="conservative">Conservative</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="aggressive">Aggressive</option>
+                    </select>
+                </div>
+            </div>
 
             <div className="space-y-4">
                 {strategies.map((strategy) => (

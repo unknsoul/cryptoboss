@@ -284,7 +284,7 @@ export default function RootLayout({
     return (
         <html lang="en" className="dark">
             <head>
-                <title>CryptoBoss v1.0.1 | Trading Control Dashboard</title>
+                <title>CryptoBoss v12.0 | Professional SMC Scalper Dashboard</title>
                 <meta name="description" content="Professional crypto trading control panel" />
             </head>
             <body className={`${inter.className} bg-[#0f1419] text-[#e7e9ea] antialiased`}>
