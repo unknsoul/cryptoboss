@@ -21,6 +21,7 @@ Required Environment Variables:
 import asyncio
 import logging
 import os
+import aiohttp
 from typing import Dict, List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
@@ -226,6 +227,14 @@ class BinanceClient:
         # Startup tracking
         self._startup_complete = False
         self._startup_error: Optional[str] = None
+
+        # Retry + circuit breaker state
+        self._error_count: int = 0
+        self._circuit_open: bool = False
+        self._circuit_open_at: Optional[datetime] = None
+        self._retry_delays: List[float] = [0.5, 1.0, 2.0]
+        self._circuit_error_threshold: int = 5
+        self._circuit_reset_seconds: int = 30
         
         env_name = "TESTNET" if testnet else "LIVE"
         logger.info(f"BinanceClient initialized ({env_name})")
@@ -330,6 +339,88 @@ class BinanceClient:
             parts.append(f"(Check your {'testnet' if self.testnet else 'live'} API credentials)")
         
         return " ".join(parts)
+
+    def _register_request_success(self):
+        """Reset circuit breaker state after a successful request."""
+        self._error_count = 0
+        if self._circuit_open:
+            logger.info("Circuit breaker closed after successful probe request")
+        self._circuit_open = False
+        self._circuit_open_at = None
+
+    def _register_request_failure(self):
+        """Track request failures and open the circuit when threshold is reached."""
+        self._error_count += 1
+        if self._error_count >= self._circuit_error_threshold and not self._circuit_open:
+            self._circuit_open = True
+            self._circuit_open_at = datetime.utcnow()
+            logger.error(
+                "Circuit breaker opened after %s consecutive errors",
+                self._error_count,
+            )
+
+    def _circuit_breaker_check(self) -> bool:
+        """Return True when calls are allowed, False when circuit is open."""
+        if not self._circuit_open:
+            return True
+
+        if self._circuit_open_at is None:
+            return False
+
+        elapsed = (datetime.utcnow() - self._circuit_open_at).total_seconds()
+        if elapsed >= self._circuit_reset_seconds:
+            # Half-open probe: allow one request to test connectivity.
+            self._circuit_open = False
+            self._error_count = 0
+            self._circuit_open_at = None
+            logger.warning("Circuit breaker moving to half-open after cooldown")
+            return True
+        return False
+
+    async def _request_with_retry(
+        self,
+        method,
+        endpoint,
+        max_retries=3,
+        **kwargs,
+    ):
+        """Execute public REST request with retry and circuit breaker safeguards."""
+        if not self._circuit_breaker_check():
+            raise RuntimeError("Binance circuit breaker is open")
+
+        retries = max(1, int(max_retries))
+        url = f"{self.endpoints.rest_base}{endpoint}"
+        params = kwargs.pop("params", None)
+        timeout = float(kwargs.pop("timeout", 10))
+
+        for attempt in range(retries):
+            try:
+                request_timeout = aiohttp.ClientTimeout(total=timeout)
+                async with aiohttp.ClientSession(timeout=request_timeout) as session:
+                    async with session.request(
+                        method=method.upper(),
+                        url=url,
+                        params=params,
+                        **kwargs,
+                    ) as response:
+                        if response.status >= 400:
+                            body = await response.text()
+                            raise Exception(f"HTTP {response.status}: {body}")
+
+                        data = await response.json(content_type=None)
+                        self._register_request_success()
+                        return data
+
+            except Exception as exc:
+                self._register_request_failure()
+                if attempt == retries - 1:
+                    raise Exception(
+                        self._format_error(exc, f"Request failed after {retries} attempts")
+                    ) from exc
+
+                delay_idx = min(attempt, len(self._retry_delays) - 1)
+                delay = self._retry_delays[delay_idx]
+                await asyncio.sleep(delay)
     
     async def sync_server_time(self) -> int:
         """
@@ -734,6 +825,28 @@ class BinanceClient:
         except Exception as e:
             logger.error(self._format_error(e, "Failed to get open orders"))
             return []
+
+    async def get_exchange_info(self) -> Dict:
+        """Get exchange metadata (symbols, filters, limits)."""
+        return await self._request_with_retry("GET", "/api/v3/exchangeInfo")
+
+    async def get_order_book(self, symbol: str, limit: int = 20) -> Dict:
+        """Get spot order book snapshot for a symbol."""
+        symbol_clean = symbol.replace("/", "").upper()
+        return await self._request_with_retry(
+            "GET",
+            "/api/v3/depth",
+            params={"symbol": symbol_clean, "limit": int(limit)},
+        )
+
+    async def get_recent_trades(self, symbol: str, limit: int = 500) -> List[Dict]:
+        """Get recent public trades for a symbol."""
+        symbol_clean = symbol.replace("/", "").upper()
+        return await self._request_with_retry(
+            "GET",
+            "/api/v3/trades",
+            params={"symbol": symbol_clean, "limit": int(limit)},
+        )
     
     async def get_ohlcv(
         self,
