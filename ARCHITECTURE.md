@@ -26,6 +26,28 @@ graph TD
 
 ---
 
+## v2 Phase 1 Foundation (April 2026)
+
+This repository now includes Phase 1 building blocks for the CryptoBoss v2 context-first architecture:
+
+- `src/data/pipeline.py`: async multi-timeframe OHLCV pipeline with normalization, in-memory cache, optional Redis cache, and `OHLCV_UPDATED` event publication.
+- `src/analysis/indicators.py`: unified indicator computation engine (trend, momentum, volatility, volume, and structure primitives).
+- `src/core/config_manager_v2.py`: strict pydantic-backed config schema with runtime hot reload support.
+- `configs/bot_config.yaml`: v2 master runtime configuration.
+
+```mermaid
+graph LR
+    A[Exchange OHLCV] --> B[DataPipeline]
+    B --> C[IndicatorEngine]
+    B --> D[EventBus OHLCV_UPDATED]
+    E[ConfigManagerV2] --> B
+    E --> C
+```
+
+Phase 1 implementation goal is to make data ingestion deterministic and auditable before higher-level context, bias, and ML modules are introduced.
+
+---
+
 ## Core Principles
 
 | Principle | Implementation |

@@ -35,6 +35,7 @@ class EventType(Enum):
     """Event types in the system."""
     # Market Data
     PRICE_TICK = "price_tick"
+    OHLCV_UPDATED = "ohlcv_updated"
     CANDLE_CLOSE = "candle_close"
     ORDERBOOK_UPDATE = "orderbook_update"
     

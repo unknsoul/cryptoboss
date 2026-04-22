@@ -58,6 +58,7 @@ rich>=13.9.0            # Beautiful terminal output
 sqlalchemy>=2.0.0       # Modern ORM
 alembic>=1.13.0         # Database migrations
 psycopg2-binary>=2.9.0  # PostgreSQL
+asyncpg>=0.28.0         # Async PostgreSQL driver
 redis>=5.0.0            # Caching
 aioredis>=2.0.0         # Async Redis
 
@@ -86,6 +87,8 @@ typing-extensions>=4.12.0
 python-dateutil>=2.9.0
 pytz>=2024.1
 tqdm>=4.67.0            # Progress bars
+apscheduler>=3.10.0     # Scheduling for retrain/maintenance jobs
+tenacity>=8.2.0         # Exponential backoff retry logic
 
 # ==================== DEPENDENCY INJECTION ====================
 dependency-injector>=4.42.0

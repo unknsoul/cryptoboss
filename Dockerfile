@@ -46,8 +46,7 @@ ENV PATH=/home/cryptoboss/.local/bin:$PATH
 
 # Copy application code
 COPY --chown=cryptoboss:cryptoboss src/ ./src/
-COPY --chown=cryptoboss:cryptoboss config/ ./config/
-COPY --chown=cryptoboss:cryptoboss main.py .
+COPY --chown=cryptoboss:cryptoboss configs/ ./configs/
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs /app/models \

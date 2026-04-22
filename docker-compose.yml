@@ -22,6 +22,8 @@ services:
 
       # Database
       - DATABASE_URL=postgresql://cryptoboss:${POSTGRES_PASSWORD}@postgres:5432/cryptoboss
+      - REDIS_URL=redis://redis:6379/0
+      - BOT_CONFIG_PATH=/app/configs/bot_config.yaml
 
       # Execution mode (paper/live)
       - EXECUTION_MODE=${EXECUTION_MODE:-paper}
@@ -38,7 +40,7 @@ services:
       - ./data:/app/data
       - ./models:/app/models
       - ./logs:/app/logs
-      - ./config:/app/config:ro
+      - ./configs:/app/configs:ro
     networks:
       - trading-net
     depends_on:

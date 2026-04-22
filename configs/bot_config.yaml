@@ -1,0 +1,36 @@
+trading:
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+  base_timeframes:
+    - 15m
+    - 1h
+    - 4h
+    - 1d
+  mode: paper
+  exchange: binance
+  leverage: 1
+  max_trades: 3
+
+risk:
+  max_risk_per_trade_pct: 2.0
+  max_portfolio_risk_pct: 6.0
+  max_daily_loss_pct: 3.0
+  max_drawdown_halt_pct: 15.0
+  max_sl_pct: 2.5
+
+ml:
+  confidence_threshold: 0.65
+  retrain_interval_days: 7
+  model_dir: models/
+  use_lstm: true
+  use_sentiment: true
+  use_onchain: false
+
+notifications:
+  telegram_enabled: true
+  discord_enabled: false
+  notify_on_entry: true
+  notify_on_exit: true
+  daily_summary_hour_utc: 0
