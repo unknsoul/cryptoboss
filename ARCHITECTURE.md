@@ -48,6 +48,27 @@ Phase 1 implementation goal is to make data ingestion deterministic and auditabl
 
 ---
 
+## v2 Phase 2 Context And Bias Intelligence (April 2026)
+
+Phase 2 adds market intelligence modules that convert raw multi-timeframe data into directional permissions:
+
+- `src/analysis/market_context.py`: `MarketContextEngine` with regime classification, structure bias detection, key-level extraction, and proximity checks.
+- `src/analysis/bias_engine.py`: `BiasEngine` to produce an authoritative HTF directional bias from 4H and 1D context.
+- `src/analysis/sentiment_engine.py`: `SentimentEngine` for composite sentiment scoring and extreme-sentiment flags.
+
+```mermaid
+graph LR
+    A[Indicator-Enhanced OHLCV] --> B[MarketContextEngine]
+    B --> C[BiasEngine]
+    D[Sentiment Sources] --> E[SentimentEngine]
+    C --> F[Trade Permission Layer]
+    E --> F
+```
+
+Phase 2 implementation goal is to ensure trade direction and context quality are explicitly derived and testable before ML and execution layers consume them.
+
+---
+
 ## Core Principles
 
 | Principle | Implementation |
