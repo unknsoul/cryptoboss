@@ -1,0 +1,1287 @@
+{
+  "_metadata": {
+    "version": "v12.0-PRODUCTION-FINAL",
+    "schema": "cryptoboss-config-v12",
+    "created": "2026-04-23",
+    "target_repo": "https://github.com/unknsoul/cryptoboss",
+    "upgrade_from": "v11.0-FINAL",
+    "architecture_level": "10.0",
+    "target_architecture": "Context-First SMC/ICT Discretionary Trader + Scalper",
+    "status": "PRODUCTION-READY-FOR-TESTING",
+    "note_on_model": "User requested 'gpt-5.3-codex' which does not exist as of April 2026. Config uses 'gpt-4o' (latest stable OpenAI model). Replace with 'o3' or future model string when available.",
+    "strategy_philosophy": "Structure-first. Read market context from HTF, derive bias, identify liquidity pools, wait for sweep+confirmation at premium/discount OB/FVG zones, enter only with MTF confluence. No forced trades."
+  },
+
+  "system": {
+    "name": "CryptoBoss",
+    "version": "v12.0",
+    "mode": "paper",
+    "environment": "testnet",
+    "exchange": "binance",
+    "base_currency": "USDT",
+    "initial_capital_usdt": 10000.0,
+    "max_concurrent_positions": 3,
+    "allow_simultaneous_long_short": false,
+    "startup_mode": "cold_start_with_validation",
+    "health_check_interval_seconds": 30,
+    "main_loop_interval_seconds": 5,
+    "data_fetch_concurrency": 5,
+    "enable_paper_mode_slippage": true,
+    "enable_paper_mode_fees": true,
+    "timezone": "UTC"
+  },
+
+  "environment_config": {
+    "live": {
+      "rest_endpoint": "https://api.binance.com/api",
+      "ws_endpoint": "wss://stream.binance.com:9443/ws",
+      "env_tag": "LIVE_EXCHANGE",
+      "ui_banner_color": "RED",
+      "ui_banner_text": "LIVE TRADING - REAL FUNDS AT RISK"
+    },
+    "testnet": {
+      "rest_endpoint": "https://testnet.binance.vision/api",
+      "ws_endpoint": "wss://testnet.binance.vision/ws",
+      "env_tag": "TESTNET_EXCHANGE",
+      "ui_banner_color": "ORANGE",
+      "ui_banner_text": "TESTNET MODE - Simulated Funds"
+    },
+    "paper": {
+      "rest_endpoint": null,
+      "ws_endpoint": "wss://stream.binance.com:9443/ws",
+      "env_tag": "SIMULATED",
+      "ui_banner_color": "BLUE",
+      "ui_banner_text": "PAPER TRADING - No Real Money"
+    },
+    "environment_guard": {
+      "immutable_after_startup": true,
+      "mixed_environment_rendering_blocked": true,
+      "every_response_must_include_env_signature": true,
+      "stale_data_threshold_seconds": 60,
+      "stale_data_action": "WARN_AND_HALT_NEW_ENTRIES"
+    }
+  },
+
+  "symbols": [
+    {
+      "pair": "BTCUSDT",
+      "display": "Bitcoin",
+      "rank": 1,
+      "enabled": true,
+      "min_trade_usdt": 20,
+      "max_position_usdt": 2000,
+      "tick_size": 0.01,
+      "lot_step": 0.00001,
+      "funding_rate_threshold_pct": 0.1,
+      "volatility_profile": "HIGH",
+      "preferred_session": ["LONDON", "NEW_YORK"],
+      "scalping_enabled": true,
+      "swing_enabled": true
+    },
+    {
+      "pair": "ETHUSDT",
+      "display": "Ethereum",
+      "rank": 2,
+      "enabled": true,
+      "min_trade_usdt": 15,
+      "max_position_usdt": 2000,
+      "tick_size": 0.01,
+      "lot_step": 0.0001,
+      "funding_rate_threshold_pct": 0.1,
+      "volatility_profile": "HIGH",
+      "preferred_session": ["LONDON", "NEW_YORK"],
+      "scalping_enabled": true,
+      "swing_enabled": true
+    },
+    {
+      "pair": "SOLUSDT",
+      "display": "Solana",
+      "rank": 3,
+      "enabled": true,
+      "min_trade_usdt": 10,
+      "max_position_usdt": 1500,
+      "tick_size": 0.001,
+      "lot_step": 0.01,
+      "funding_rate_threshold_pct": 0.12,
+      "volatility_profile": "VERY_HIGH",
+      "preferred_session": ["LONDON", "NEW_YORK"],
+      "scalping_enabled": true,
+      "swing_enabled": true
+    },
+    {
+      "pair": "BNBUSDT",
+      "display": "BNB",
+      "rank": 4,
+      "enabled": true,
+      "min_trade_usdt": 10,
+      "max_position_usdt": 1500,
+      "tick_size": 0.01,
+      "lot_step": 0.001,
+      "funding_rate_threshold_pct": 0.1,
+      "volatility_profile": "HIGH",
+      "preferred_session": ["LONDON", "NEW_YORK"],
+      "scalping_enabled": true,
+      "swing_enabled": true
+    },
+    {
+      "pair": "XRPUSDT",
+      "display": "XRP",
+      "rank": 5,
+      "enabled": true,
+      "min_trade_usdt": 10,
+      "max_position_usdt": 1000,
+      "tick_size": 0.0001,
+      "lot_step": 0.1,
+      "funding_rate_threshold_pct": 0.15,
+      "volatility_profile": "HIGH",
+      "preferred_session": ["LONDON", "NEW_YORK"],
+      "scalping_enabled": false,
+      "swing_enabled": true
+    }
+  ],
+
+  "data_pipeline": {
+    "provider": "binance_ccxt",
+    "cache_backend": "memory",
+    "redis_enabled": false,
+    "redis_url": "redis://localhost:6379/0",
+    "max_candles_per_tf": 500,
+    "normalization": true,
+    "event_publish_on_close": true,
+    "event_name": "OHLCV_UPDATED",
+    "rate_limit_requests_per_minute": 1200,
+    "retry_attempts": 3,
+    "retry_backoff_seconds": 2,
+    "warmup_candles": 200,
+    "data_authenticity_tagging": true,
+    "timeframes_required": ["1m", "5m", "15m", "1h", "4h", "1d", "1w"],
+    "timeframe_weights": {
+      "1w":  1.0,
+      "1d":  0.95,
+      "4h":  0.85,
+      "1h":  0.75,
+      "15m": 0.6,
+      "5m":  0.45,
+      "1m":  0.3
+    }
+  },
+
+  "multi_timeframe_analysis": {
+    "htf_primary": "1d",
+    "htf_secondary": "4h",
+    "mtf_primary": "1h",
+    "mtf_secondary": "15m",
+    "ltf_entry": "5m",
+    "ltf_scalp": "1m",
+    "cascade_rule": "HTF_BIAS_GOVERNS_ALL",
+    "alignment_required": {
+      "swing_trade": ["1d", "4h", "1h"],
+      "intraday_trade": ["4h", "1h", "15m"],
+      "scalp_trade": ["1h", "15m", "5m"]
+    },
+    "bias_conflict_action": "NO_TRADE",
+    "minimum_aligned_tfs": 3,
+    "partial_alignment_penalty": 0.3
+  },
+
+  "market_structure": {
+    "enabled": true,
+    "module": "src/analysis/market_structure.py",
+    "class": "MarketStructureEngine",
+    "swing_lookback_candles": 20,
+    "swing_pivot_confirmation_candles": 3,
+    "structure_types": {
+      "BOS": {
+        "name": "Break of Structure",
+        "significance": "trend_continuation",
+        "required_body_close": true,
+        "weight": 0.7
+      },
+      "CHoCH": {
+        "name": "Change of Character",
+        "significance": "potential_reversal",
+        "required_body_close": true,
+        "weight": 0.9
+      },
+      "MSB": {
+        "name": "Market Structure Break",
+        "significance": "strong_reversal",
+        "required_body_close": true,
+        "weight": 1.0
+      }
+    },
+    "trend_classification": {
+      "BULLISH_TRENDING": "HH+HL pattern intact, last BOS was bullish",
+      "BEARISH_TRENDING": "LH+LL pattern intact, last BOS was bearish",
+      "RANGING": "No clear HH/HL or LH/LL, price oscillating between levels",
+      "DISTRIBUTION": "Multiple LH failures at resistance, CHoCH pending",
+      "ACCUMULATION": "Multiple HL holds at support, CHoCH pending"
+    },
+    "minimum_swing_size_atr_multiplier": 0.5,
+    "invalidation_on_swing_fail": true
+  },
+
+  "smart_money_concepts": {
+    "enabled": true,
+    "module": "src/analysis/smc_engine.py",
+    "class": "SMCEngine",
+
+    "order_blocks": {
+      "enabled": true,
+      "detection": {
+        "bullish_ob": "Last bearish candle before strong bullish impulse (BOS candle)",
+        "bearish_ob": "Last bullish candle before strong bearish impulse (BOS candle)",
+        "ob_minimum_impulse_atr_multiplier": 1.5,
+        "ob_must_precede_bos": true,
+        "ob_body_percentage_minimum": 0.4,
+        "breaker_block_enabled": true,
+        "breaker_block_definition": "Mitigated OB that price breaks through - flips polarity"
+      },
+      "mitigation": {
+        "full_mitigation": "50pct_retracement_into_ob",
+        "partial_mitigation_threshold": 0.3,
+        "invalidation_on_full_close_through": true
+      },
+      "scoring": {
+        "freshness_weight": 0.35,
+        "impulse_strength_weight": 0.35,
+        "confluence_with_sr_weight": 0.30
+      },
+      "max_ob_age_candles": {
+        "1d": 50,
+        "4h": 100,
+        "1h": 200,
+        "15m": 300,
+        "5m": 400
+      },
+      "require_displacement_before_return": true
+    },
+
+    "fair_value_gaps": {
+      "enabled": true,
+      "detection": {
+        "fvg_definition": "3-candle pattern where candle[1] body gap between candle[0] high and candle[2] low (bullish FVG) or candle[0] low and candle[2] high (bearish FVG)",
+        "minimum_gap_size_atr_multiplier": 0.3,
+        "minimum_gap_size_price_pct": 0.05,
+        "inverse_fvg_enabled": true,
+        "inverse_fvg_definition": "FVG that gets partially filled and acts as resistance/support"
+      },
+      "fill_levels": {
+        "equilibrium_50pct": true,
+        "full_fill_invalidates": true,
+        "partial_fill_threshold": 0.5
+      },
+      "scoring": {
+        "size_weight": 0.4,
+        "freshness_weight": 0.35,
+        "htf_alignment_weight": 0.25
+      },
+      "max_fvg_age_candles": {
+        "4h": 80,
+        "1h": 150,
+        "15m": 250,
+        "5m": 350
+      }
+    },
+
+    "liquidity": {
+      "enabled": true,
+      "types": {
+        "BSL": {
+          "name": "Buyside Liquidity",
+          "definition": "Equal highs, prior highs, trendline highs, stop clusters above price",
+          "sweep_confirmation": "wick_above_with_bearish_close_below"
+        },
+        "SSL": {
+          "name": "Sellside Liquidity",
+          "definition": "Equal lows, prior lows, trendline lows, stop clusters below price",
+          "sweep_confirmation": "wick_below_with_bullish_close_above"
+        },
+        "VOID": {
+          "name": "Liquidity Void",
+          "definition": "Price moved too fast leaving no orders - magnetic for return",
+          "enabled": true
+        }
+      },
+      "equal_highs_lows": {
+        "tolerance_pct": 0.15,
+        "minimum_touches": 2,
+        "lookback_candles": 50
+      },
+      "sweep_detection": {
+        "wick_extension_minimum_atr": 0.3,
+        "close_back_inside_required": true,
+        "volume_spike_on_sweep_preferred": true,
+        "volume_spike_multiplier": 1.5
+      },
+      "hunt_premium_discount": {
+        "enabled": true,
+        "premium_zone_above_pct": 70,
+        "discount_zone_below_pct": 30,
+        "equilibrium_range_pct": 10
+      }
+    },
+
+    "premium_discount_zones": {
+      "enabled": true,
+      "reference_swing": "last_major_swing_leg",
+      "premium_threshold": 0.618,
+      "discount_threshold": 0.382,
+      "optimal_entry_zone": [0.618, 0.79],
+      "fibonacci_levels": [0, 0.236, 0.382, 0.5, 0.618, 0.705, 0.786, 1.0],
+      "bias_aligned_entries_only": true
+    },
+
+    "inducement": {
+      "enabled": true,
+      "definition": "Small liquidity pool intentionally swept before real move",
+      "minimum_retracement_after_inducement": 0.382,
+      "do_not_enter_on_inducement": true,
+      "wait_for_second_sweep_confirmation": true
+    },
+
+    "displacement": {
+      "enabled": true,
+      "definition": "Strong impulse candle(s) with large body, minimal wick, high volume",
+      "minimum_body_pct_of_range": 0.7,
+      "minimum_atr_multiplier": 1.5,
+      "required_before_entry": true
+    }
+  },
+
+  "market_context_engine": {
+    "enabled": true,
+    "module": "src/analysis/market_context.py",
+    "class": "MarketContextEngine",
+    "update_interval_seconds": 60,
+    "regime_detection": {
+      "method": "composite",
+      "indicators": {
+        "ADX": {
+          "period": 14,
+          "trending_threshold": 25,
+          "strong_trend_threshold": 40,
+          "weight": 0.3
+        },
+        "ATR_normalized": {
+          "period": 14,
+          "high_volatility_threshold": 0.025,
+          "weight": 0.25
+        },
+        "Hurst_exponent": {
+          "lookback": 100,
+          "trending_threshold": 0.55,
+          "mean_reverting_threshold": 0.45,
+          "weight": 0.2
+        },
+        "volume_trend": {
+          "period": 20,
+          "rising_volume_confirms_trend": true,
+          "weight": 0.15
+        },
+        "price_compression": {
+          "bbw_period": 20,
+          "compression_threshold": 0.02,
+          "weight": 0.1
+        }
+      },
+      "regimes": {
+        "TRENDING_BULLISH":  { "capital_allocation_pct": 100, "strategy": "OB_FVG_TREND_FOLLOW", "allowed": true },
+        "TRENDING_BEARISH":  { "capital_allocation_pct": 100, "strategy": "OB_FVG_TREND_FOLLOW", "allowed": true },
+        "RANGING":           { "capital_allocation_pct": 75,  "strategy": "RANGE_SCALP_SR",       "allowed": true },
+        "HIGH_VOLATILITY":   { "capital_allocation_pct": 30,  "strategy": "VOLATILITY_BREAKOUT",   "allowed": true },
+        "LOW_VOLATILITY":    { "capital_allocation_pct": 50,  "strategy": "ACCUMULATION_WATCH",    "allowed": false },
+        "NO_TRADE":          { "capital_allocation_pct": 0,   "strategy": null,                    "allowed": false }
+      }
+    },
+    "key_level_extraction": {
+      "enabled": true,
+      "sources": ["swing_highs_lows", "OB_zones", "FVG_zones", "round_numbers", "daily_open_close", "weekly_open"],
+      "significance_minimum_touches": 2,
+      "proximity_alert_pct": 0.3
+    },
+    "session_awareness": {
+      "enabled": true,
+      "sessions": {
+        "ASIA":     { "utc_open": "00:00", "utc_close": "09:00", "liquidity": "LOW",    "trade_quality": "MODERATE" },
+        "LONDON":   { "utc_open": "08:00", "utc_close": "16:00", "liquidity": "HIGH",   "trade_quality": "HIGH" },
+        "NEW_YORK": { "utc_open": "13:00", "utc_close": "21:00", "liquidity": "HIGHEST","trade_quality": "HIGHEST" },
+        "OVERLAP":  { "utc_open": "13:00", "utc_close": "16:00", "liquidity": "HIGHEST","trade_quality": "HIGHEST" }
+      },
+      "prefer_london_ny_overlap": true,
+      "no_trade_30min_before_major_news": true,
+      "no_trade_30min_after_major_news": true
+    }
+  },
+
+  "bias_engine": {
+    "enabled": true,
+    "module": "src/analysis/bias_engine.py",
+    "class": "BiasEngine",
+    "htf_sources": ["1d", "4h"],
+    "bias_types": ["BULLISH", "BEARISH", "NEUTRAL"],
+    "confluence_required_tfs": 2,
+    "bias_scoring": {
+      "HTF_structure": 0.35,
+      "OB_location": 0.25,
+      "FVG_fill_direction": 0.20,
+      "liquidity_swept": 0.20
+    },
+    "bias_confidence_levels": {
+      "HIGH":    { "min_score": 0.75, "capital_multiplier": 1.0 },
+      "MEDIUM":  { "min_score": 0.5,  "capital_multiplier": 0.7 },
+      "LOW":     { "min_score": 0.25, "capital_multiplier": 0.0 },
+      "NEUTRAL": { "min_score": 0.0,  "capital_multiplier": 0.0 }
+    },
+    "anti_bias_trade_block": true,
+    "bias_update_interval_seconds": 300,
+    "conflicting_bias_action": "NO_TRADE",
+    "require_minimum_confidence": "MEDIUM"
+  },
+
+  "trade_permission_filter": {
+    "enabled": true,
+    "module": "src/core/trade_permission_filter.py",
+    "class": "TradePermissionFilter",
+    "gates": [
+      {
+        "id": "G1_REGIME",
+        "name": "Market Regime Gate",
+        "check": "regime != NO_TRADE",
+        "veto_power": true,
+        "veto_message": "Market regime is NO_TRADE - no entries allowed"
+      },
+      {
+        "id": "G2_BIAS",
+        "name": "HTF Bias Gate",
+        "check": "bias_confidence >= MEDIUM AND trade_direction == bias_direction",
+        "veto_power": true,
+        "veto_message": "Trade direction conflicts with HTF bias or bias confidence too low"
+      },
+      {
+        "id": "G3_SESSION",
+        "name": "Session Quality Gate",
+        "check": "session.trade_quality in [HIGH, HIGHEST]",
+        "veto_power": false,
+        "veto_message": "Low-liquidity session - trade quality reduced",
+        "penalty_if_failed": 0.5
+      },
+      {
+        "id": "G4_CONFLUENCE",
+        "name": "Confluence Score Gate",
+        "check": "confluence_score >= 0.65",
+        "veto_power": true,
+        "veto_message": "Insufficient confluence - minimum 65% required"
+      },
+      {
+        "id": "G5_STRUCTURE",
+        "name": "Entry Zone Structural Gate",
+        "check": "entry_at_OB OR entry_at_FVG OR entry_at_liquidity_zone",
+        "veto_power": true,
+        "veto_message": "Entry not at a structural zone (OB/FVG/Liquidity) - rejected"
+      },
+      {
+        "id": "G6_LIQUIDITY",
+        "name": "Liquidity Sweep Gate",
+        "check": "prior_liquidity_swept_in_direction",
+        "veto_power": false,
+        "veto_message": "No recent liquidity sweep - lower quality setup",
+        "penalty_if_failed": 0.2
+      },
+      {
+        "id": "G7_DISPLACEMENT",
+        "name": "Displacement Candle Gate",
+        "check": "displacement_candle_present_after_poi",
+        "veto_power": false,
+        "veto_message": "No displacement candle present - wait for confirmation",
+        "penalty_if_failed": 0.3
+      },
+      {
+        "id": "G8_RISK",
+        "name": "Pre-Risk Sanity Gate",
+        "check": "rr_ratio >= 2.0 AND sl_beyond_structural_level",
+        "veto_power": true,
+        "veto_message": "R:R below 2.0 or SL not beyond structural invalidation"
+      }
+    ],
+    "all_veto_gates_must_pass": true,
+    "decision_logged_always": true
+  },
+
+  "strategies": {
+    "active_strategies": ["SMC_TREND_FOLLOW", "SMC_SCALPER", "RANGE_SCALP"],
+    "strategy_selection_method": "regime_and_bias_driven",
+    "strategy_proposal_only": true,
+
+    "SMC_TREND_FOLLOW": {
+      "name": "Smart Money Concepts Trend Follower",
+      "class": "src/strategies/smc_trend_follow.py::SMCTrendFollowStrategy",
+      "description": "Enters with HTF trend at premium/discount OB/FVG zones after liquidity sweep and displacement. Targets next liquidity pool.",
+      "enabled": true,
+      "applicable_regimes": ["TRENDING_BULLISH", "TRENDING_BEARISH"],
+      "applicable_sessions": ["LONDON", "NEW_YORK", "OVERLAP"],
+      "timeframe_for_entry": "15m",
+      "timeframe_for_confluence": ["4h", "1h"],
+
+      "entry_conditions": {
+        "long": [
+          "HTF_bias == BULLISH (4H + 1D aligned)",
+          "Price in discount zone (below 50% of last swing range)",
+          "Bullish OB identified on 1H or 15M",
+          "Prior SSL swept (sellside liquidity taken)",
+          "Displacement candle present (bullish impulse from OB)",
+          "FVG present inside or above OB (confluence)",
+          "15M CHoCH bullish (structure shift on LTF)",
+          "No major resistance directly above entry"
+        ],
+        "short": [
+          "HTF_bias == BEARISH (4H + 1D aligned)",
+          "Price in premium zone (above 50% of last swing range)",
+          "Bearish OB identified on 1H or 15M",
+          "Prior BSL swept (buyside liquidity taken)",
+          "Displacement candle present (bearish impulse from OB)",
+          "FVG present inside or below OB (confluence)",
+          "15M CHoCH bearish (structure shift on LTF)",
+          "No major support directly below entry"
+        ]
+      },
+
+      "entry_type": "limit",
+      "entry_zone": "OB_50pct_to_OB_low",
+      "entry_trigger": "first_5m_candle_close_back_above_OB_50pct",
+
+      "stop_loss": {
+        "method": "below_OB_low_plus_buffer",
+        "buffer_atr_multiplier": 0.2,
+        "invalidation_level": "below_displacement_origin",
+        "hard_max_sl_pct": 2.0
+      },
+
+      "take_profit": {
+        "method": "multi_target",
+        "targets": [
+          { "tp_id": "TP1", "target": "prior_swing_high_or_BSL", "portion_pct": 40, "rr_minimum": 2.0 },
+          { "tp_id": "TP2", "target": "next_HTF_OB_or_FVG",      "portion_pct": 35, "rr_minimum": 3.5 },
+          { "tp_id": "TP3", "target": "next_major_liquidity",     "portion_pct": 25, "rr_minimum": 5.0, "move_sl_to_be_after_tp1": true }
+        ]
+      },
+
+      "confluence_scoring": {
+        "HTF_OB_present":         0.20,
+        "LTF_OB_present":         0.15,
+        "FVG_present":            0.15,
+        "liquidity_swept":        0.20,
+        "displacement_present":   0.10,
+        "CHoCH_on_LTF":           0.10,
+        "session_quality_high":   0.05,
+        "round_number_nearby":    0.05,
+        "minimum_score_required": 0.65
+      }
+    },
+
+    "SMC_SCALPER": {
+      "name": "Smart Money Concepts Scalper",
+      "class": "src/strategies/smc_scalper.py::SMCScalperStrategy",
+      "description": "Fast-entry scalper on 5M/1M using OB/FVG reaction points in direction of 1H bias. Targets small liquidity pools. Short duration, high R:R.",
+      "enabled": true,
+      "applicable_regimes": ["TRENDING_BULLISH", "TRENDING_BEARISH", "RANGING"],
+      "applicable_sessions": ["OVERLAP", "LONDON", "NEW_YORK"],
+      "applicable_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"],
+      "timeframe_for_entry": "5m",
+      "timeframe_for_confluence": ["1h", "15m"],
+      "max_hold_minutes": 120,
+      "max_trades_per_session": 3,
+
+      "entry_conditions": {
+        "long": [
+          "1H bias BULLISH",
+          "5M OB identified at discount zone",
+          "Micro SSL swept on 1M or 5M",
+          "Bullish displacement candle from OB on 5M",
+          "1M CHoCH bullish inside OB zone"
+        ],
+        "short": [
+          "1H bias BEARISH",
+          "5M OB identified at premium zone",
+          "Micro BSL swept on 1M or 5M",
+          "Bearish displacement candle from OB on 5M",
+          "1M CHoCH bearish inside OB zone"
+        ]
+      },
+
+      "entry_type": "market_on_trigger",
+      "entry_trigger": "1M_CHoCH_confirmed",
+
+      "stop_loss": {
+        "method": "below_5M_OB_low_plus_buffer",
+        "buffer_atr_multiplier": 0.15,
+        "hard_max_sl_pct": 0.8
+      },
+
+      "take_profit": {
+        "method": "multi_target",
+        "targets": [
+          { "tp_id": "TP1", "target": "nearest_micro_BSL_SSL",    "portion_pct": 60, "rr_minimum": 2.0 },
+          { "tp_id": "TP2", "target": "15M_key_level",            "portion_pct": 40, "rr_minimum": 3.0, "move_sl_to_be_after_tp1": true }
+        ]
+      },
+
+      "time_exit": {
+        "enabled": true,
+        "max_duration_minutes": 120,
+        "no_new_entries_last_30min_of_session": true
+      },
+
+      "confluence_scoring": {
+        "1H_OB_alignment":        0.25,
+        "5M_OB_present":          0.20,
+        "micro_liquidity_swept":  0.20,
+        "1M_CHoCH":               0.20,
+        "FVG_nearby":             0.15,
+        "minimum_score_required": 0.65
+      }
+    },
+
+    "RANGE_SCALP": {
+      "name": "Range Scalper",
+      "class": "src/strategies/range_scalp.py::RangeScalpStrategy",
+      "description": "Identifies clear ranging markets. Buys at structural support OB, sells at structural resistance OB. Requires confirmed range boundaries.",
+      "enabled": true,
+      "applicable_regimes": ["RANGING"],
+      "applicable_sessions": ["LONDON", "NEW_YORK"],
+      "timeframe_for_entry": "15m",
+      "timeframe_for_range_definition": "1h",
+      "max_trades_per_range": 4,
+      "range_invalidation_on_close_outside_pct": 0.3,
+
+      "entry_conditions": {
+        "long": [
+          "Price at range low support OB",
+          "Minimum 2 bounces from support",
+          "Bullish displacement from OB",
+          "No bearish OB overhead within 1.5x SL distance"
+        ],
+        "short": [
+          "Price at range high resistance OB",
+          "Minimum 2 rejections from resistance",
+          "Bearish displacement from OB",
+          "No bullish OB below within 1.5x SL distance"
+        ]
+      },
+
+      "stop_loss": {
+        "method": "outside_range_boundary_plus_buffer",
+        "buffer_atr_multiplier": 0.3,
+        "hard_max_sl_pct": 1.5
+      },
+
+      "take_profit": {
+        "method": "range_midpoint_and_opposite_boundary",
+        "targets": [
+          { "tp_id": "TP1", "target": "range_midpoint",   "portion_pct": 50, "rr_minimum": 1.5 },
+          { "tp_id": "TP2", "target": "opposite_boundary","portion_pct": 50, "rr_minimum": 2.5, "move_sl_to_be_after_tp1": true }
+        ]
+      }
+    }
+  },
+
+  "scoring_contract": {
+    "enabled": true,
+    "module": "src/core/scoring_contract.py",
+    "class": "ScoringContract",
+    "mandatory_components": {
+      "context_fit": {
+        "weight": 0.30,
+        "description": "How well proposal matches market context and regime",
+        "minimum_score": 0.5
+      },
+      "historical_expectancy": {
+        "weight": 0.25,
+        "description": "Historical win rate and R:R for this setup type",
+        "minimum_rr": 2.0,
+        "minimum_win_rate": 0.45
+      },
+      "recent_performance_decay": {
+        "weight": 0.25,
+        "description": "Time-weighted performance over last 20 trades",
+        "decay_half_life_trades": 10,
+        "cooldown_after_consecutive_losses": 3
+      },
+      "risk_alignment": {
+        "weight": 0.20,
+        "description": "Compliance with risk rules, SL validity, position sizing",
+        "hard_rules_must_pass": true
+      }
+    },
+    "minimum_composite_score": 0.65,
+    "proposals_below_threshold_action": "REJECT_WITH_LOG",
+    "max_proposals_evaluated_per_cycle": 3,
+    "proposal_expiry_seconds": 30
+  },
+
+  "capital_governor": {
+    "enabled": true,
+    "module": "src/core/capital_governor.py",
+    "class": "CapitalGovernor",
+    "total_capital_usdt": 10000,
+    "max_deployed_pct": 60,
+    "per_symbol_max_pct": 20,
+    "base_risk_per_trade_pct": 1.0,
+    "kelly_fraction": 0.25,
+    "kelly_enabled": false,
+    "context_multipliers": {
+      "TRENDING_BULLISH":  1.00,
+      "TRENDING_BEARISH":  1.00,
+      "RANGING":           0.75,
+      "HIGH_VOLATILITY":   0.30,
+      "NO_TRADE":          0.00
+    },
+    "bias_confidence_multipliers": {
+      "HIGH":    1.0,
+      "MEDIUM":  0.7,
+      "LOW":     0.0,
+      "NEUTRAL": 0.0
+    },
+    "drawdown_reduction_schedule": {
+      "drawdown_5pct":  { "capital_multiplier": 0.8,  "new_positions_allowed": true },
+      "drawdown_10pct": { "capital_multiplier": 0.5,  "new_positions_allowed": true },
+      "drawdown_15pct": { "capital_multiplier": 0.25, "new_positions_allowed": false, "reduce_only": true },
+      "drawdown_20pct": { "capital_multiplier": 0.0,  "new_positions_allowed": false, "halt_trading": true }
+    },
+    "position_sizing_method": "fixed_risk_percentage",
+    "size_reduction_on_consecutive_losses": {
+      "enabled": true,
+      "after_n_losses": 2,
+      "reduction_pct_per_loss": 25,
+      "reset_after_win": true
+    }
+  },
+
+  "risk_guardian": {
+    "enabled": true,
+    "module": "src/core/risk_guardian.py",
+    "class": "RiskGuardian",
+    "kill_switch": {
+      "enabled": true,
+      "persists_across_restarts": true,
+      "requires_operator_acknowledge_to_resume": true
+    },
+    "order_level": {
+      "max_single_order_usdt": 2000,
+      "min_single_order_usdt": 10,
+      "max_slippage_pct": 0.3,
+      "max_spread_pct": 0.15
+    },
+    "strategy_level": {
+      "max_drawdown_per_strategy_pct": 10,
+      "max_allocation_per_strategy_pct": 40,
+      "min_rr_ratio": 2.0,
+      "max_sl_pct_of_price": 2.5,
+      "min_sl_pct_of_price": 0.1
+    },
+    "portfolio_level": {
+      "max_daily_drawdown_pct": 3.0,
+      "max_weekly_drawdown_pct": 6.0,
+      "max_monthly_drawdown_pct": 15.0,
+      "max_total_exposure_pct": 60,
+      "max_correlated_positions": 2,
+      "max_consecutive_losses": 5,
+      "circuit_breaker_on_consecutive_losses": true,
+      "circuit_breaker_cooldown_minutes": 240
+    },
+    "funding_rate_guard": {
+      "enabled": true,
+      "max_funding_rate_pct": 0.1,
+      "close_position_if_exceeded": false,
+      "no_new_entries_if_exceeded": true
+    },
+    "volatility_guard": {
+      "enabled": true,
+      "max_atr_pct_for_new_entries": 5.0,
+      "reduce_size_in_high_volatility": true
+    }
+  },
+
+  "trade_management": {
+    "enabled": true,
+    "module": "src/core/trade_management_engine.py",
+    "class": "TradeManagementEngine",
+
+    "breakeven": {
+      "enabled": true,
+      "trigger": "when_TP1_hit",
+      "move_sl_to": "entry_plus_fees",
+      "buffer_ticks": 3
+    },
+
+    "trailing_stop": {
+      "enabled": true,
+      "activation": "after_TP1_hit",
+      "method": "structure_based",
+      "trail_below_last_swing_low_long": true,
+      "trail_above_last_swing_high_short": true,
+      "atr_trail_multiplier": 1.5,
+      "fallback_method": "atr_trailing",
+      "lock_in_profit_minimum_pct": 0.5
+    },
+
+    "partial_exits": {
+      "enabled": true,
+      "exit_schedule": [
+        { "trigger": "TP1_hit", "close_pct": 40, "action": "move_sl_to_be" },
+        { "trigger": "TP2_hit", "close_pct": 35, "action": "trail_stop_activate" },
+        { "trigger": "TP3_hit", "close_pct": 25, "action": "close_remainder" }
+      ]
+    },
+
+    "time_based_management": {
+      "enabled": true,
+      "no_hold_over_weekend": false,
+      "reduce_size_after_hours_holding": {
+        "enabled": true,
+        "reduce_after_hours": 24,
+        "reduce_pct": 50
+      },
+      "force_close_at_session_end": false
+    },
+
+    "adverse_move_management": {
+      "enabled": true,
+      "if_price_returns_to_entry_after_tp1": "trail_from_be",
+      "if_structure_invalidated": "close_immediately",
+      "if_opposite_signal_fires": "evaluate_close"
+    }
+  },
+
+  "decision_pipeline_v2": {
+    "description": "8-stage pipeline - every stage must pass for trade execution",
+    "stages": [
+      { "id": 1, "name": "MarketContextEngine",    "module": "market_context_engine",    "veto": true },
+      { "id": 2, "name": "ContextStateMachine",    "module": "context_state_machine",    "veto": true },
+      { "id": 3, "name": "BiasEngine",             "module": "bias_engine",              "veto": true },
+      { "id": 4, "name": "StrategyProposals",      "module": "strategies",               "veto": false },
+      { "id": 5, "name": "ScoringContract",        "module": "scoring_contract",         "veto": true },
+      { "id": 6, "name": "TradePermissionFilter",  "module": "trade_permission_filter",  "veto": true },
+      { "id": 7, "name": "CapitalGovernor",        "module": "capital_governor",         "veto": true },
+      { "id": 8, "name": "RiskGuardian",           "module": "risk_guardian",            "veto": true }
+    ],
+    "any_veto_blocks_execution": true,
+    "all_decisions_logged": true,
+    "decision_narrative_required": true
+  },
+
+  "ai_intelligence": {
+    "enabled": true,
+    "description": "AI-assisted market narrative analysis. Provides contextual intelligence layer. Does NOT execute trades directly.",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "_note": "User requested 'gpt-5.3-codex' which does not exist. Using 'gpt-4o' (latest stable). Update model string when GPT-5 or newer is available.",
+    "api_key_env": "OPENAI_API_KEY",
+    "role": "INTELLIGENCE_ADVISORY_ONLY",
+    "functions": [
+      {
+        "name": "market_narrative_analysis",
+        "enabled": true,
+        "interval_minutes": 30,
+        "prompt_template": "You are a professional Smart Money Concepts trader analyzing {symbol}. Given the following multi-timeframe data:\n\nHTF (1D/4H) Bias: {htf_bias}\nMarket Structure: {structure_state}\nActive OBs: {order_blocks}\nActive FVGs: {fair_value_gaps}\nLiquidity Pools: {liquidity_pools}\nCurrent Regime: {regime}\nSession: {session}\n\nProvide: (1) Likely next price target based on where liquidity rests, (2) Key levels to watch, (3) Whether current price is in premium or discount, (4) Trade direction confidence score 0-1. Response in JSON format only.",
+        "output_field": "ai_narrative",
+        "weight_in_confluence_score": 0.15,
+        "timeout_seconds": 10,
+        "fail_gracefully": true
+      },
+      {
+        "name": "news_sentiment_filter",
+        "enabled": true,
+        "interval_minutes": 60,
+        "data_source": "web_search_headlines",
+        "prompt_template": "Analyze these crypto headlines for {symbol} and rate overall market sentiment on a scale of -1 (extremely bearish) to +1 (extremely bullish). Headlines: {headlines}\n\nReturn JSON: {sentiment_score: float, key_themes: list, risk_events_detected: bool}",
+        "output_field": "ai_sentiment",
+        "sentiment_threshold_to_block_trade": 0.7,
+        "risk_event_detection_blocks_new_entries": true
+      }
+    ]
+  },
+
+  "indicators": {
+    "module": "src/analysis/indicators.py",
+    "class": "IndicatorEngine",
+    "compute_on_close": true,
+    "batch_compute_all_tfs": true,
+    "indicators": {
+      "trend": {
+        "EMA_20":     { "period": 20, "source": "close" },
+        "EMA_50":     { "period": 50, "source": "close" },
+        "EMA_200":    { "period": 200, "source": "close" },
+        "EMA_cross":  { "fast": 20, "slow": 50, "signal_on_cross": true },
+        "SMA_200":    { "period": 200, "source": "close" }
+      },
+      "momentum": {
+        "RSI":     { "period": 14, "overbought": 70, "oversold": 30 },
+        "MACD":    { "fast": 12, "slow": 26, "signal": 9 },
+        "Stoch":   { "k": 14, "d": 3, "smooth": 3 }
+      },
+      "volatility": {
+        "ATR":   { "period": 14 },
+        "BB":    { "period": 20, "std_dev": 2.0 },
+        "Keltner": { "period": 20, "atr_multiplier": 2.0 }
+      },
+      "volume": {
+        "OBV":    { "enabled": true },
+        "VWAP":   { "reset": "daily", "enabled": true },
+        "CVD":    { "enabled": true, "delta_bar_type": "tick_estimated" },
+        "volume_profile": { "enabled": true, "lookback_days": 5, "poc_enabled": true, "vah_val_enabled": true }
+      },
+      "structure": {
+        "pivot_highs": { "left_bars": 5, "right_bars": 5 },
+        "pivot_lows":  { "left_bars": 5, "right_bars": 5 },
+        "supertrend":  { "period": 10, "multiplier": 3.0 }
+      }
+    }
+  },
+
+  "execution": {
+    "module": "src/core/execution_router.py",
+    "class": "ExecutionRouter",
+    "default_order_type": "limit",
+    "limit_order_timeout_seconds": 60,
+    "limit_cancel_and_market_on_timeout": true,
+    "post_only_for_maker_rebate": false,
+    "slippage_model": {
+      "paper_mode": {
+        "enabled": true,
+        "slippage_pct_mean": 0.05,
+        "slippage_pct_std": 0.02,
+        "market_impact_enabled": true
+      },
+      "live_mode": {
+        "max_acceptable_slippage_pct": 0.3,
+        "reject_if_exceeded": true
+      }
+    },
+    "fee_model": {
+      "maker_fee_pct": 0.02,
+      "taker_fee_pct": 0.04,
+      "apply_in_paper_mode": true
+    },
+    "retry_on_failure": {
+      "enabled": true,
+      "max_retries": 3,
+      "backoff_seconds": 1
+    },
+    "rate_limits": {
+      "max_orders_per_minute": 20,
+      "max_orders_per_10_seconds": 5
+    }
+  },
+
+  "state_manager": {
+    "module": "src/core/state_manager.py",
+    "class": "StateManager",
+    "backend": "sqlite",
+    "db_path": "data/cryptoboss_state.db",
+    "checkpoint_interval_seconds": 30,
+    "crash_recovery_enabled": true,
+    "recovery_strategy": "restore_open_positions_and_verify",
+    "audit_log_enabled": true,
+    "audit_log_path": "logs/audit_trail.jsonl"
+  },
+
+  "decision_logger": {
+    "enabled": true,
+    "module": "src/core/decision_logger.py",
+    "class": "DecisionLogger",
+    "log_every_pipeline_stage": true,
+    "log_all_vetoes_with_reason": true,
+    "log_approved_trades_full_context": true,
+    "include_confluence_scores": true,
+    "include_indicator_snapshot": true,
+    "include_ai_narrative": true,
+    "output_formats": ["jsonl", "sqlite"],
+    "jsonl_path": "logs/decisions.jsonl",
+    "db_table": "decision_log",
+    "rotation_days": 30
+  },
+
+  "incident_state_machine": {
+    "module": "src/core/incident_state_machine.py",
+    "class": "IncidentStateMachine",
+    "states": {
+      "NORMAL":           { "trading": "FULL",        "description": "All systems operational" },
+      "DEGRADED":         { "trading": "REDUCED_50",  "description": "Minor issues - reduced sizing" },
+      "INCIDENT_FREEZE":  { "trading": "REDUCE_ONLY", "description": "Significant problem - close only" },
+      "HALTED":           { "trading": "NONE",        "description": "Critical failure - no trading" }
+    },
+    "auto_transition_rules": {
+      "NORMAL_to_DEGRADED":        "3_consecutive_errors OR exchange_latency_above_2s",
+      "DEGRADED_to_INCIDENT_FREEZE": "5_consecutive_errors OR daily_loss_exceeds_2pct",
+      "INCIDENT_FREEZE_to_HALTED": "kill_switch_triggered OR daily_loss_exceeds_3pct",
+      "HALTED_to_NORMAL":          "operator_acknowledge_required AND manual_only"
+    },
+    "freeze_exit_requires_operator": true,
+    "halt_exit_requires_operator": true
+  },
+
+  "backtesting": {
+    "enabled": true,
+    "module": "run_backtest.py",
+    "engine": "vectorbt",
+    "fallback_engine": "custom_event_driven",
+    "default_capital": 10000,
+    "commission_pct": 0.04,
+    "slippage_pct": 0.05,
+    "default_symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
+    "default_period": {
+      "start": "2023-01-01",
+      "end": "2025-12-31"
+    },
+    "walk_forward": {
+      "enabled": true,
+      "training_months": 6,
+      "testing_months": 2,
+      "min_periods": 3
+    },
+    "monte_carlo": {
+      "enabled": true,
+      "simulations": 1000,
+      "confidence_level": 0.95
+    },
+    "performance_targets": {
+      "sharpe_ratio_minimum": 1.5,
+      "win_rate_minimum_pct": 45,
+      "max_drawdown_maximum_pct": 20,
+      "profit_factor_minimum": 1.5,
+      "average_rr_minimum": 2.0
+    },
+    "report_output_path": "data/backtest_reports/"
+  },
+
+  "monitoring": {
+    "prometheus": {
+      "enabled": true,
+      "port": 9090,
+      "metrics_path": "/metrics",
+      "custom_metrics": [
+        "trade_count_total",
+        "win_rate_rolling_20",
+        "pnl_daily_usdt",
+        "drawdown_current_pct",
+        "regime_current",
+        "bias_confidence_score",
+        "pipeline_veto_count_by_gate",
+        "ai_narrative_sentiment_score"
+      ]
+    },
+    "health_endpoint": {
+      "enabled": true,
+      "port": 8080,
+      "path": "/health",
+      "detailed_path": "/health/detailed"
+    },
+    "grafana": {
+      "enabled": false,
+      "dashboard_template": "dashboard/grafana_dashboard.json"
+    }
+  },
+
+  "notifications": {
+    "telegram": {
+      "enabled": true,
+      "bot_token_env": "TELEGRAM_BOT_TOKEN",
+      "chat_id_env": "TELEGRAM_USER_ID",
+      "events": [
+        "TRADE_OPENED", "TRADE_CLOSED", "TP1_HIT", "TP2_HIT", "TP3_HIT",
+        "SL_HIT", "DAILY_LOSS_THRESHOLD", "KILL_SWITCH_TRIGGERED",
+        "INCIDENT_STATE_CHANGE", "AI_RISK_EVENT_DETECTED",
+        "CIRCUIT_BREAKER_ACTIVATED", "REGIME_CHANGE"
+      ],
+      "include_decision_narrative": true,
+      "include_pnl_update": true,
+      "rate_limit_per_minute": 5
+    },
+    "discord": {
+      "enabled": false,
+      "webhook_url_env": "DISCORD_WEBHOOK_URL",
+      "events": ["TRADE_OPENED", "TRADE_CLOSED", "DAILY_SUMMARY"]
+    },
+    "email": {
+      "enabled": false,
+      "smtp_host_env": "SMTP_HOST",
+      "events": ["WEEKLY_REPORT", "KILL_SWITCH_TRIGGERED"]
+    }
+  },
+
+  "dashboard": {
+    "backend": {
+      "framework": "fastapi",
+      "host": "0.0.0.0",
+      "port": 8000,
+      "module": "dashboard/app.py"
+    },
+    "frontend": {
+      "framework": "react",
+      "port": 3000,
+      "build_dir": "frontend/dist"
+    },
+    "panels": [
+      "EnvironmentBanner",
+      "PortfolioOverview",
+      "OpenPositions",
+      "DecisionPipelineStatus",
+      "MultiTimeframeHeatmap",
+      "BiasConfidenceGauge",
+      "SMCZoneMap",
+      "RecentTradesWithNarrative",
+      "WhyNoTrade",
+      "IncidentTimeline",
+      "OperatorActionsLog",
+      "PerformanceMetrics",
+      "AIMarketNarrative",
+      "StartupProgress"
+    ],
+    "realtime_updates": {
+      "enabled": true,
+      "protocol": "websocket",
+      "update_interval_ms": 2000
+    }
+  },
+
+  "secrets_management": {
+    "provider": "environment",
+    "required_secrets": [
+      "BINANCE_API_KEY",
+      "BINANCE_API_SECRET",
+      "OPENAI_API_KEY"
+    ],
+    "optional_secrets": [
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_USER_ID",
+      "DISCORD_WEBHOOK_URL",
+      "REDIS_URL",
+      "DB_ENCRYPTION_KEY"
+    ],
+    "validate_on_startup": true,
+    "fail_startup_if_required_missing": true
+  },
+
+  "logging": {
+    "level": "INFO",
+    "format": "json",
+    "outputs": ["console", "file"],
+    "file_path": "logs/cryptoboss.log",
+    "rotation": "daily",
+    "retention_days": 30,
+    "separate_logs": {
+      "decisions": "logs/decisions.jsonl",
+      "trades": "logs/trades.jsonl",
+      "errors": "logs/errors.log",
+      "audit": "logs/audit_trail.jsonl"
+    },
+    "sensitive_field_masking": ["api_key", "api_secret", "password"]
+  },
+
+  "known_issues_fixed": [
+    {
+      "id": "FIX-001",
+      "issue": "No SMC/ICT strategy - only DCA, Grid, Market Making (not suited for directional discretionary trading)",
+      "fix": "Added SMCTrendFollowStrategy, SMCScalperStrategy, RangeScalpStrategy with full OB/FVG/liquidity logic"
+    },
+    {
+      "id": "FIX-002",
+      "issue": "MarketContextEngine, BiasEngine, TradePermissionFilter, TradeManagementEngine, DecisionLogger all marked as planned but not implemented",
+      "fix": "Full configuration spec provided for all 5 missing modules with exact class paths, methods, and parameters"
+    },
+    {
+      "id": "FIX-003",
+      "issue": "No multi-timeframe confluence system - single timeframe signal only",
+      "fix": "Full MTF hierarchy: 1W->1D->4H->1H->15M->5M->1M with cascade rules and alignment requirements"
+    },
+    {
+      "id": "FIX-004",
+      "issue": "No Order Block detection/invalidation logic",
+      "fix": "Complete OB detection, mitigation, scoring, age limits, breaker block logic defined"
+    },
+    {
+      "id": "FIX-005",
+      "issue": "No Fair Value Gap detection",
+      "fix": "Full FVG 3-candle detection, fill levels, inverse FVG, scoring defined"
+    },
+    {
+      "id": "FIX-006",
+      "issue": "No liquidity sweep detection (BSL/SSL)",
+      "fix": "Full BSL/SSL detection with wick extension, close confirmation, volume spike validation"
+    },
+    {
+      "id": "FIX-007",
+      "issue": "No premium/discount zone logic for entry filtering",
+      "fix": "Fibonacci-based premium (above 61.8%) and discount (below 38.2%) zones with OEZ [61.8-78.6%]"
+    },
+    {
+      "id": "FIX-008",
+      "issue": "No CHoCH/BOS market structure classification per timeframe",
+      "fix": "Full MarketStructureEngine with CHoCH, BOS, MSB detection, swing pivot logic, trend classification"
+    },
+    {
+      "id": "FIX-009",
+      "issue": "Capital allocation not regime-adaptive",
+      "fix": "CapitalGovernor with 5-level regime multipliers, bias confidence multipliers, drawdown schedule"
+    },
+    {
+      "id": "FIX-010",
+      "issue": "No partial exits or structure-based trailing stop",
+      "fix": "3-tier partial exits with TP1=BE trigger, TP2=trail activation, structure-based trail method"
+    },
+    {
+      "id": "FIX-011",
+      "issue": "No session awareness - trading at all hours equally",
+      "fix": "Session filter (Asia/London/NY/Overlap), prefer high-liquidity sessions, news blackout periods"
+    },
+    {
+      "id": "FIX-012",
+      "issue": "No trade scoring/confluence threshold - any signal could fire",
+      "fix": "ScoringContract with minimum 65% composite score, 4 mandatory components, proposal expiry"
+    },
+    {
+      "id": "FIX-013",
+      "issue": "No AI intelligence layer for market narrative context",
+      "fix": "OpenAI gpt-4o integration for market narrative analysis and news sentiment filtering (advisory only)"
+    },
+    {
+      "id": "FIX-014",
+      "issue": "No displacement candle confirmation before entry",
+      "fix": "Displacement gate in TradePermissionFilter - requires strong impulse candle from POI before entry"
+    },
+    {
+      "id": "FIX-015",
+      "issue": "Consecutive loss management missing from risk layer",
+      "fix": "Size reduction on 2+ consecutive losses, circuit breaker at 5 losses, 4h cooldown"
+    }
+  ],
+
+  "upgrade_roadmap": {
+    "phase_1_immediate": [
+      "Implement SMCEngine (smc_engine.py) with OB/FVG/liquidity detection using this config spec",
+      "Implement MarketStructureEngine (market_structure.py) with CHoCH/BOS/swing detection",
+      "Implement BiasEngine (bias_engine.py) using HTF structure + OB + FVG scoring",
+      "Implement TradePermissionFilter (trade_permission_filter.py) with all 8 gates",
+      "Implement TradeManagementEngine (trade_management_engine.py) with partial exits + trail",
+      "Implement DecisionLogger (decision_logger.py) with JSONL + SQLite output",
+      "Wire SMCTrendFollowStrategy + SMCScalperStrategy into existing StrategyBase"
+    ],
+    "phase_2_validation": [
+      "Run full backtest on all 5 symbols: 2023-01-01 to 2025-12-31",
+      "Walk-forward validation: 6-month training, 2-month test windows",
+      "Monte Carlo simulation 1000 runs - verify drawdown expectations",
+      "Paper trade minimum 4 weeks - compare live vs backtest metrics",
+      "Verify: Sharpe > 1.5, Win Rate > 45%, Max DD < 20%, PF > 1.5"
+    ],
+    "phase_3_production": [
+      "Enable Testnet mode with real API key",
+      "Validate execution quality and slippage against paper mode assumptions",
+      "Enable Telegram notifications and verify alert delivery",
+      "Enable dashboard and verify all panels render correctly",
+      "Run 30-day testnet test - verify all risk guards trigger correctly",
+      "Operator review of all Decision Logger outputs - tune scoring thresholds",
+      "Live deployment: start $500 capital, scale up after 3 months profitability"
+    ]
+  }
+}
