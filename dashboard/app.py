@@ -20,7 +20,7 @@ import signal
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -97,6 +97,15 @@ active_connections: List[WebSocket] = []
 async def dashboard():
     """Serve the professional trading dashboard"""
     return get_professional_dashboard_html()
+
+
+@app.get("/audit")
+async def audit_dashboard():
+    """Serve the static codebase audit dashboard page."""
+    audit_path = Path(__file__).parent / "static" / "audit.html"
+    if not audit_path.exists():
+        return HTMLResponse("Audit page not found", status_code=404)
+    return FileResponse(str(audit_path))
 
 
 @app.get("/api/status")

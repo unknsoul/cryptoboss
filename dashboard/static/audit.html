@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoBoss Full Audit</title>
+    <style>
+        :root {
+            --font-sans: "Inter", "Segoe UI", sans-serif;
+            --font-mono: "Consolas", "Courier New", monospace;
+
+            --color-background-primary: #0f172a;
+            --color-background-secondary: #111827;
+            --color-border-tertiary: #334155;
+            --color-border-secondary: #475569;
+            --color-text-primary: #e2e8f0;
+            --color-text-secondary: #94a3b8;
+
+            --color-background-danger: rgba(226, 75, 74, 0.16);
+            --color-text-danger: #fca5a5;
+            --color-background-warning: rgba(186, 117, 23, 0.16);
+            --color-text-warning: #fcd34d;
+            --color-background-info: rgba(59, 130, 246, 0.16);
+            --color-text-info: #93c5fd;
+            --color-background-success: rgba(99, 153, 34, 0.16);
+            --color-text-success: #bbf7d0;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--font-sans);
+            color: var(--color-text-primary);
+            background: radial-gradient(circle at 20% 10%, rgba(59, 130, 246, 0.12), transparent 45%),
+                        radial-gradient(circle at 80% 0%, rgba(99, 153, 34, 0.1), transparent 40%),
+                        var(--color-background-primary);
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .audit-shell {
+            max-width: 1080px;
+            margin: 0 auto;
+            border: 0.5px solid var(--color-border-tertiary);
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 22px 54px rgba(2, 6, 23, 0.45);
+            padding: 22px;
+        }
+
+        .audit-tab-bar { display: flex; gap: 4px; border-bottom: 0.5px solid var(--color-border-tertiary); margin-bottom: 20px; }
+        .audit-tab { padding: 8px 16px; font-size: 13px; cursor: pointer; border-radius: 6px 6px 0 0; border: 0.5px solid transparent; color: var(--color-text-secondary); background: transparent; transition: all .15s; }
+        .audit-tab.active { background: var(--color-background-primary); border-color: var(--color-border-tertiary); border-bottom-color: var(--color-background-primary); color: var(--color-text-primary); font-weight: 500; margin-bottom: -0.5px; }
+        .audit-tab:hover:not(.active) { color: var(--color-text-primary); }
+
+        .audit-panel { display: none; }
+        .audit-panel.active { display: block; }
+
+        .audit-score-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+        .audit-score-row:last-child { border: none; }
+        .audit-score-label { font-size: 13px; flex: 1; color: var(--color-text-primary); }
+        .audit-score-sub { font-size: 11px; color: var(--color-text-secondary); margin-top: 1px; }
+
+        .audit-bar-wrap { width: 160px; height: 6px; background: var(--color-border-tertiary); border-radius: 3px; overflow: hidden; }
+        .audit-bar { height: 100%; border-radius: 3px; transition: width .4s ease; }
+        .audit-bar.g { background: #639922; }
+        .audit-bar.a { background: #ba7517; }
+        .audit-bar.r { background: #e24b4a; }
+
+        .audit-score-num { font-size: 13px; font-weight: 500; min-width: 34px; text-align: right; }
+
+        .audit-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+        .audit-tag.crit { background: var(--color-background-danger); color: var(--color-text-danger); }
+        .audit-tag.high { background: var(--color-background-warning); color: var(--color-text-warning); }
+        .audit-tag.med { background: var(--color-background-info); color: var(--color-text-info); }
+        .audit-tag.done { background: var(--color-background-success); color: var(--color-text-success); }
+
+        .audit-upgrade-card { border: 0.5px solid var(--color-border-tertiary); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
+        .audit-upgrade-title { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .audit-upgrade-body { font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
+        .audit-upgrade-code { font-family: var(--font-mono); font-size: 11px; background: var(--color-background-secondary); padding: 8px 10px; border-radius: 6px; margin-top: 8px; line-height: 1.7; overflow-x: auto; border: 0.5px solid var(--color-border-tertiary); white-space: pre; }
+
+        .audit-check-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 0.5px solid var(--color-border-tertiary); cursor: pointer; }
+        .audit-check-item:last-child { border: none; }
+        .audit-check-box { width: 18px; height: 18px; border: 0.5px solid var(--color-border-secondary); border-radius: 4px; flex-shrink: 0; margin-top: 1px; display: flex; align-items: center; justify-content: center; transition: all .15s; }
+        .audit-check-box.checked { background: #639922; border-color: #639922; }
+        .audit-check-box.checked::after { content: '\2713'; color: #fff; font-size: 11px; }
+
+        .audit-check-text { font-size: 13px; flex: 1; }
+        .audit-check-sub { font-size: 11px; color: var(--color-text-secondary); margin-top: 1px; }
+
+        .audit-sect-head { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: .06em; margin: 16px 0 8px; }
+
+        .audit-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .audit-stat-card { background: var(--color-background-secondary); border-radius: 8px; padding: 12px 14px; border: 0.5px solid var(--color-border-tertiary); }
+        .audit-stat-num { font-size: 24px; font-weight: 500; line-height: 1; }
+        .audit-stat-label { font-size: 12px; color: var(--color-text-secondary); margin-top: 4px; }
+
+        .audit-arch-row { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 0.5px solid var(--color-border-tertiary); font-size: 13px; }
+        .audit-arch-row:last-child { border: none; }
+
+        .audit-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .audit-dot-g { background: #639922; }
+        .audit-dot-a { background: #ba7517; }
+        .audit-dot-r { background: #e24b4a; }
+
+        .audit-arch-name { flex: 1; font-weight: 500; }
+        .audit-arch-desc { font-size: 11px; color: var(--color-text-secondary); margin-left: 8px; }
+
+        .audit-total-bar { height: 8px; border-radius: 4px; background: var(--color-border-tertiary); overflow: hidden; margin-bottom: 4px; }
+        .audit-total-fill { height: 100%; border-radius: 4px; background: #639922; transition: width .6s; }
+
+        .audit-btn { padding: 6px 14px; font-size: 12px; border: 0.5px solid var(--color-border-secondary); border-radius: 6px; cursor: pointer; background: transparent; color: var(--color-text-primary); }
+        .audit-btn:hover { background: var(--color-background-secondary); }
+
+        .audit-muted { font-size: 12px; color: var(--color-text-secondary); }
+        .audit-header-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; gap: 12px; }
+
+        @media (max-width: 900px) {
+            body { padding: 12px; }
+            .audit-shell { padding: 14px; }
+            .audit-grid2 { grid-template-columns: 1fr; }
+            .audit-score-row { flex-wrap: wrap; }
+            .audit-bar-wrap { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="audit-shell">
+        <h2 style="position:absolute;clip:rect(0,0,0,0)">CryptoBoss full codebase audit and upgrade plan</h2>
+
+        <div class="audit-header-row">
+            <div>
+                <div style="font-size:18px;font-weight:500">CryptoBoss - Full Audit</div>
+                <div class="audit-muted" style="margin-top:2px">44+ modules - Python 73% - TypeScript 18% - 28 commits</div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:22px;font-weight:500;color:#ba7517">7.5 / 10</div>
+                <div class="audit-muted" style="font-size:11px">current score</div>
+            </div>
+        </div>
+
+        <div class="audit-tab-bar">
+            <button class="audit-tab active" onclick="showAuditPanel('overview', this)">Overview</button>
+            <button class="audit-tab" onclick="showAuditPanel('issues', this)">Critical issues</button>
+            <button class="audit-tab" onclick="showAuditPanel('upgrades', this)">Final upgrades</button>
+            <button class="audit-tab" onclick="showAuditPanel('testing', this)">Test checklist</button>
+        </div>
+
+        <div id="audit-panel-overview" class="audit-panel active">
+            <div class="audit-grid2" style="margin-bottom:16px">
+                <div class="audit-stat-card"><div class="audit-stat-num">6</div><div class="audit-stat-label">Production-ready modules</div></div>
+                <div class="audit-stat-card"><div class="audit-stat-num">5</div><div class="audit-stat-label">Planned (not built)</div></div>
+                <div class="audit-stat-card"><div class="audit-stat-num">3</div><div class="audit-stat-label">Critical security issues</div></div>
+                <div class="audit-stat-card"><div class="audit-stat-num">9.5</div><div class="audit-stat-label">Target score after upgrades</div></div>
+            </div>
+
+            <div class="audit-sect-head">Component health</div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-g"></div><div class="audit-arch-name">TradingEngine</div><span class="audit-tag done">Stable</span><div class="audit-arch-desc">Lifecycle, orchestration, strategy management</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-g"></div><div class="audit-arch-name">RiskGuardian</div><span class="audit-tag done">Stable</span><div class="audit-arch-desc">3-level: order / strategy / portfolio</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-g"></div><div class="audit-arch-name">ExecutionRouter</div><span class="audit-tag done">Stable</span><div class="audit-arch-desc">Paper + live, slippage simulation</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-g"></div><div class="audit-arch-name">StateManager</div><span class="audit-tag done">Stable</span><div class="audit-arch-desc">SQLite crash-proof persistence</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-g"></div><div class="audit-arch-name">EventBus</div><span class="audit-tag done">Stable</span><div class="audit-arch-desc">Event-driven internal comms</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-g"></div><div class="audit-arch-name">AdvancedRegimeDetector</div><span class="audit-tag done">Stable</span><div class="audit-arch-desc">ATR + ADX + Hurst classification</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-a"></div><div class="audit-arch-name">MarketContextEngine</div><span class="audit-tag high">Planned</span><div class="audit-arch-desc">Multi-timeframe context - not implemented</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-a"></div><div class="audit-arch-name">BiasEngine</div><span class="audit-tag high">Planned</span><div class="audit-arch-desc">HTF directional bias - not implemented</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-a"></div><div class="audit-arch-name">TradePermissionFilter</div><span class="audit-tag high">Planned</span><div class="audit-arch-desc">Pre-execution gate - not implemented</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-a"></div><div class="audit-arch-name">TradeManagementEngine</div><span class="audit-tag high">Planned</span><div class="audit-arch-desc">Professional exits - not implemented</div></div>
+            <div class="audit-arch-row"><div class="audit-status-dot audit-dot-r"></div><div class="audit-arch-name">DecisionLogger</div><span class="audit-tag crit">Planned</span><div class="audit-arch-desc">Audit trail - needed before live</div></div>
+
+            <div class="audit-sect-head" style="margin-top:20px">Score breakdown</div>
+            <div class="audit-score-row"><div class="audit-score-label">Risk management<div class="audit-score-sub">Multi-level protection, circuit breakers, emergency stop</div></div><div class="audit-bar-wrap"><div class="audit-bar g" style="width:90%"></div></div><div class="audit-score-num" style="color:#639922">9/10</div></div>
+            <div class="audit-score-row"><div class="audit-score-label">Execution layer<div class="audit-score-sub">Paper + live + realistic simulation</div></div><div class="audit-bar-wrap"><div class="audit-bar g" style="width:80%"></div></div><div class="audit-score-num" style="color:#639922">8/10</div></div>
+            <div class="audit-score-row"><div class="audit-score-label">Strategy quality<div class="audit-score-sub">DCA only functional; Grid/MM incomplete for backtest</div></div><div class="audit-bar-wrap"><div class="audit-bar a" style="width:60%"></div></div><div class="audit-score-num" style="color:#ba7517">6/10</div></div>
+            <div class="audit-score-row"><div class="audit-score-label">Backtest engine<div class="audit-score-sub">Basic; chart rendering buggy; no walk-forward</div></div><div class="audit-bar-wrap"><div class="audit-bar a" style="width:55%"></div></div><div class="audit-score-num" style="color:#ba7517">5.5/10</div></div>
+            <div class="audit-score-row"><div class="audit-score-label">Security<div class="audit-score-sub">.keyfile committed, logs in repo, no .env.example</div></div><div class="audit-bar-wrap"><div class="audit-bar r" style="width:30%"></div></div><div class="audit-score-num" style="color:#e24b4a">3/10</div></div>
+            <div class="audit-score-row"><div class="audit-score-label">Test coverage<div class="audit-score-sub">Only 3 test files for 44+ modules</div></div><div class="audit-bar-wrap"><div class="audit-bar r" style="width:40%"></div></div><div class="audit-score-num" style="color:#e24b4a">4/10</div></div>
+            <div class="audit-score-row"><div class="audit-score-label">Observability<div class="audit-score-sub">Prometheus, structured logs, Telegram/Discord</div></div><div class="audit-bar-wrap"><div class="audit-bar g" style="width:85%"></div></div><div class="audit-score-num" style="color:#639922">8.5/10</div></div>
+            <div class="audit-score-row"><div class="audit-score-label">DevOps / CI<div class="audit-score-sub">GitHub Actions, Docker, compose - solid</div></div><div class="audit-bar-wrap"><div class="audit-bar g" style="width:80%"></div></div><div class="audit-score-num" style="color:#639922">8/10</div></div>
+        </div>
+
+        <div id="audit-panel-issues" class="audit-panel">
+            <div class="audit-upgrade-card" style="border-color:#e24b4a">
+                <div class="audit-upgrade-title"><span class="audit-tag crit">CRITICAL</span> .keyfile committed to public repo</div>
+                <div class="audit-upgrade-body">A .keyfile is visible in the public repo root. This may contain API keys or secrets. Rotate exposed credentials, remove the file from git history, and add it to .gitignore.</div>
+                <div class="audit-upgrade-code">git filter-branch --force --index-filter
+"git rm --cached --ignore-unmatch .keyfile"
+--prune-empty --tag-name-filter cat -- --all
+git push origin --force --all
+
+echo ".keyfile" >> .gitignore</div>
+            </div>
+
+            <div class="audit-upgrade-card" style="border-color:#e24b4a">
+                <div class="audit-upgrade-title"><span class="audit-tag crit">CRITICAL</span> Log files committed - run_output.txt, error_log.txt, test_output.txt</div>
+                <div class="audit-upgrade-body">Runtime log and output files are tracked by git. These can leak runtime details and should be ignored by source control.</div>
+                <div class="audit-upgrade-code">echo "run_output.txt" >> .gitignore
+echo "error_log.txt" >> .gitignore
+echo "test_output.txt" >> .gitignore
+git rm --cached run_output.txt error_log.txt test_output.txt</div>
+            </div>
+
+            <div class="audit-upgrade-card" style="border-color:#ba7517">
+                <div class="audit-upgrade-title"><span class="audit-tag high">HIGH</span> Missing .env.example while README references it</div>
+                <div class="audit-upgrade-body">README points users to copy .env.example but file is missing. Add a complete template to unblock clean setup.</div>
+                <div class="audit-upgrade-code">BINANCE_API_KEY=your_api_key_here
+BINANCE_API_SECRET=your_api_secret_here
+BINANCE_TESTNET_ENABLED=true
+TELEGRAM_BOT_TOKEN=optional
+TELEGRAM_USER_ID=optional
+DISCORD_WEBHOOK_URL=optional
+ENVIRONMENT=dev</div>
+            </div>
+
+            <div class="audit-upgrade-card" style="border-color:#ba7517">
+                <div class="audit-upgrade-title"><span class="audit-tag high">HIGH</span> Backtest chart rendering uses horizontal lines for entries</div>
+                <div class="audit-upgrade-body">In run_backtest.py, plotting trades as axhline(y=entry_price) creates misleading visuals. Plot entries and exits at their true bars with scatter markers.</div>
+            </div>
+        </div>
+
+        <div id="audit-panel-upgrades" class="audit-panel">
+            <div class="audit-sect-head">Must-do before final release</div>
+
+            <div class="audit-upgrade-card">
+                <div class="audit-upgrade-title"><span class="audit-tag crit">1</span> Implement MarketContextEngine</div>
+                <div class="audit-upgrade-body">Without context-first classification, the system remains signal-first. Include HTF/MTF/LTF regime classification before any trade consideration.</div>
+            </div>
+
+            <div class="audit-upgrade-card">
+                <div class="audit-upgrade-title"><span class="audit-tag crit">2</span> Implement TradePermissionFilter</div>
+                <div class="audit-upgrade-body">Pre-execution gating should enforce context and bias rules before routing to execution.</div>
+            </div>
+
+            <div class="audit-upgrade-card">
+                <div class="audit-upgrade-title"><span class="audit-tag crit">3</span> Implement DecisionLogger before live deployment</div>
+                <div class="audit-upgrade-body">All trade decisions should have an auditable trail with context, proposal, gate result, and outcome.</div>
+            </div>
+
+            <div class="audit-upgrade-card">
+                <div class="audit-upgrade-title"><span class="audit-tag high">4</span> Add walk-forward backtesting</div>
+                <div class="audit-upgrade-body">Use rolling train/test windows to reduce overfitting and measure out-of-sample performance honestly.</div>
+            </div>
+
+            <div class="audit-upgrade-card">
+                <div class="audit-upgrade-title"><span class="audit-tag high">5</span> Pin versions and add dependency security checks</div>
+                <div class="audit-upgrade-body">Use pinned dependencies and run pip-audit in CI to catch vulnerable packages automatically.</div>
+            </div>
+        </div>
+
+        <div id="audit-panel-testing" class="audit-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div class="audit-muted">Check off each validation item as you complete it</div>
+                <button class="audit-btn" onclick="resetAuditChecks()">Reset all</button>
+            </div>
+
+            <div id="audit-progress-wrap" style="margin-bottom:16px">
+                <div class="audit-total-bar"><div class="audit-total-fill" id="audit-prog-fill" style="width:0%"></div></div>
+                <div class="audit-muted" id="audit-prog-label">0 / 12 complete</div>
+            </div>
+
+            <div class="audit-sect-head">Security and setup</div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">.keyfile removed from history and credentials rotated</div><div class="audit-check-sub">Use git filter-branch or BFG and force-push safely.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">.env.example created and tested from clean clone</div><div class="audit-check-sub">Verify setup flow works without manual fixes.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">pip-audit runs clean for critical CVEs</div><div class="audit-check-sub">Run pip-audit -r requirements.txt --strict.</div></div></div>
+
+            <div class="audit-sect-head">Core testing</div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">pytest tests/ passes without failures</div><div class="audit-check-sub">Use pytest tests/ -v --tb=short.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">Coverage >= 70% on core modules</div><div class="audit-check-sub">Use pytest --cov=src/core --cov-report=term-missing.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">Backtest chart renders entry and exit markers correctly</div><div class="audit-check-sub">Verify scatter points align to bar timestamps.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">Walk-forward Sharpe >= 1.5 out-of-sample</div><div class="audit-check-sub">Must pass before enabling live mode.</div></div></div>
+
+            <div class="audit-sect-head">Operational readiness</div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">Paper trading runs 24h without crash</div><div class="audit-check-sub">Monitor logs at 6h, 12h, 24h checkpoints.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">State recovery restores open positions after restart</div><div class="audit-check-sub">Test with forced process termination.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">Emergency stop halts trading and emits alerts</div><div class="audit-check-sub">Trigger via low daily loss threshold and verify channels.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">Docker compose stack starts healthy</div><div class="audit-check-sub">Verify all services healthy in docker ps.</div></div></div>
+            <div class="audit-check-item" onclick="toggleAuditCheck(this)"><div class="audit-check-box"></div><div><div class="audit-check-text">Dashboard /api/health endpoint responds correctly</div><div class="audit-check-sub">Confirm status, heartbeat, and feed connectivity fields.</div></div></div>
+        </div>
+    </div>
+
+    <script>
+        function showAuditPanel(name, btn) {
+            document.querySelectorAll('.audit-panel').forEach(function (panel) {
+                panel.classList.remove('active');
+            });
+            document.querySelectorAll('.audit-tab').forEach(function (tab) {
+                tab.classList.remove('active');
+            });
+            document.getElementById('audit-panel-' + name).classList.add('active');
+            btn.classList.add('active');
+        }
+
+        function toggleAuditCheck(el) {
+            var box = el.querySelector('.audit-check-box');
+            box.classList.toggle('checked');
+            updateAuditProgress();
+        }
+
+        function updateAuditProgress() {
+            var all = document.querySelectorAll('.audit-check-box');
+            var done = document.querySelectorAll('.audit-check-box.checked').length;
+            var pct = all.length ? Math.round(done / all.length * 100) : 0;
+            document.getElementById('audit-prog-fill').style.width = pct + '%';
+            document.getElementById('audit-prog-label').textContent = done + ' / ' + all.length + ' complete';
+        }
+
+        function resetAuditChecks() {
+            document.querySelectorAll('.audit-check-box').forEach(function (box) {
+                box.classList.remove('checked');
+            });
+            updateAuditProgress();
+        }
+
+        document.addEventListener('DOMContentLoaded', updateAuditProgress);
+    </script>
+</body>
+</html>
