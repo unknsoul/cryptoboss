@@ -63,6 +63,7 @@ class PersistentEventBus(EventBus):
     
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +71,7 @@ class PersistentEventBus(EventBus):
                     timestamp TEXT NOT NULL,
                     source TEXT,
                     data_json TEXT,
+                    account_id TEXT DEFAULT '',
                     processed BOOLEAN DEFAULT 0,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
@@ -77,21 +79,36 @@ class PersistentEventBus(EventBus):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON events(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_processed ON events(processed)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_account_id ON events(account_id)")
             conn.commit()
+        
+        # Migrate existing tables
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("PRAGMA table_info(events)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if "account_id" not in columns:
+                    conn.execute("ALTER TABLE events ADD COLUMN account_id TEXT DEFAULT ''")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_account_id ON events(account_id)")
+                    conn.commit()
+                    logger.info("Migrated events table: added account_id column")
+        except Exception as e:
+            logger.warning(f"Event table migration check failed: {e}")
     
-    def _persist_event(self, event: Event) -> int:
+    def _persist_event(self, event: Event, account_id: str = "") -> int:
         """Persist event to database, return event ID."""
         with self._db_lock:
             try:
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.execute("""
-                        INSERT INTO events (event_type, timestamp, source, data_json)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO events (event_type, timestamp, source, data_json, account_id)
+                        VALUES (?, ?, ?, ?, ?)
                     """, (
                         event.event_type.value,
                         event.timestamp.isoformat(),
                         event.source,
-                        json.dumps(event.data, default=str)
+                        json.dumps(event.data, default=str),
+                        account_id,
                     ))
                     conn.commit()
                     return cursor.lastrowid
@@ -112,9 +129,9 @@ class PersistentEventBus(EventBus):
             except Exception as e:
                 logger.error(f"Failed to mark event processed: {e}")
     
-    def publish(self, event: Event):
+    def publish(self, event: Event, account_id: str = ""):
         """Publish event (persisted before dispatch)."""
-        event_id = self._persist_event(event)
+        event_id = self._persist_event(event, account_id=account_id)
         super().publish(event)
         
         # Mark as processed after dispatch

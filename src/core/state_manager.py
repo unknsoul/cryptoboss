@@ -58,41 +58,87 @@ class SQLiteBackend(StateBackend):
     
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS state (
                     key TEXT PRIMARY KEY,
                     state_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    version INTEGER DEFAULT 1
+                    version INTEGER DEFAULT 1,
+                    schema_version INTEGER DEFAULT 1
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_key ON state(key)")
             conn.commit()
+        self._migrate_schema()
+    
+    def _migrate_schema(self):
+        """Run schema migrations if needed."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Check if schema_version column exists
+                cursor = conn.execute("PRAGMA table_info(state)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if "schema_version" not in columns:
+                    conn.execute("ALTER TABLE state ADD COLUMN schema_version INTEGER DEFAULT 1")
+                    conn.commit()
+                    logger.info("Schema migration: added schema_version column")
+        except Exception as e:
+            logger.warning(f"Schema migration check failed: {e}")
     
     def save(self, key: str, state: Dict) -> bool:
+        """Save state atomically using BEGIN IMMEDIATE transaction."""
         with self._lock:
             try:
-                with sqlite3.connect(self.db_path) as conn:
+                conn = sqlite3.connect(self.db_path)
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
                     conn.execute("""
-                        INSERT OR REPLACE INTO state (key, state_json, updated_at, version)
+                        INSERT OR REPLACE INTO state (key, state_json, updated_at, version, schema_version)
                         VALUES (?, ?, ?, COALESCE(
                             (SELECT version + 1 FROM state WHERE key = ?), 1
-                        ))
+                        ), 1)
                     """, (key, json.dumps(state, default=str), datetime.now().isoformat(), key))
-                    conn.commit()
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+                finally:
+                    conn.close()
                 return True
             except Exception as e:
                 logger.error(f"Failed to save state {key}: {e}")
                 return False
     
     def load(self, key: str) -> Optional[Dict]:
+        """Load state. Returns None on corruption instead of crashing."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute("SELECT state_json FROM state WHERE key = ?", (key,))
                 row = cursor.fetchone()
-                return json.loads(row[0]) if row else None
+                if not row:
+                    return None
+                try:
+                    return json.loads(row[0])
+                except json.JSONDecodeError as je:
+                    logger.error(f"Corrupted state data for key {key}: {je}")
+                    return None
         except Exception as e:
             logger.error(f"Failed to load state {key}: {e}")
+            return None
+    
+    def backup_state(self) -> Optional[str]:
+        """Create a backup of the state database."""
+        import shutil
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = self.db_path.parent / f"state_backup_{timestamp}.db"
+            shutil.copy2(self.db_path, backup_path)
+            logger.info(f"State backup created: {backup_path}")
+            return str(backup_path)
+        except Exception as e:
+            logger.error(f"Failed to create state backup: {e}")
             return None
     
     def delete(self, key: str) -> bool:

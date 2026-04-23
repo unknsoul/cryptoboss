@@ -1,4 +1,4 @@
-// File: D:\projects\final99\frontend\app\live\page.tsx
+// File: C:\Users\hardi\Downloads\cryptoboss-main\frontend\app\live\page.tsx
 import * as entry from '../../../../app/live/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

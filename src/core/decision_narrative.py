@@ -108,13 +108,13 @@ class NarrativeEngine:
         size: float,
         context: Dict
     ) -> DecisionNarrative:
-        """
-        Create a narrative for an allowed trade.
-        """
+        """Create a narrative for an allowed trade."""
         import uuid
         
         summary = f"Trade approved for {symbol} ({strategy_name})."
         detail = f"All safety gates passed. Position size calculated at {size}."
+        
+        gates_passed = context.get("gates_passed", ["Risk", "Bias", "Spread", "Capital"])
         
         narrative = DecisionNarrative(
             narrative_id=str(uuid.uuid4())[:8],
@@ -124,7 +124,7 @@ class NarrativeEngine:
             summary_text=summary,
             detailed_text=detail,
             primary_gate="FinalExecution",
-            all_gates_passed=["Risk", "Bias", "Spread", "Capital"], # placeholder
+            all_gates_passed=gates_passed,
             blocking_gate=None,
             data_snapshot=context
         )
@@ -132,25 +132,139 @@ class NarrativeEngine:
         self._publish(narrative)
         return narrative
 
+    def generate_hold_narrative(
+        self,
+        symbol: str,
+        failed_conditions: Dict[str, str],
+        context: Dict,
+    ) -> DecisionNarrative:
+        """
+        Create a narrative explaining why no trade was taken (HOLD).
+        
+        Args:
+            symbol: Trading pair
+            failed_conditions: Dict of condition_name -> failure_reason
+            context: Market data snapshot
+        """
+        import uuid
+        
+        if not failed_conditions:
+            reason_text = "No clear directional edge detected."
+        else:
+            reasons = [f"{k}: {v}" for k, v in failed_conditions.items()]
+            reason_text = "; ".join(reasons)
+        
+        summary = f"HOLD on {symbol} — {len(failed_conditions)} conditions unmet."
+        detail = f"No trade taken because: {reason_text}"
+        
+        narrative = DecisionNarrative(
+            narrative_id=str(uuid.uuid4())[:8],
+            timestamp=datetime.utcnow(),
+            narrative_type=NarrativeType.WHY_NO_TRADE,
+            symbol=symbol,
+            summary_text=summary,
+            detailed_text=detail,
+            primary_gate="SignalEngine",
+            all_gates_passed=[],
+            blocking_gate="SignalEngine",
+            data_snapshot={**context, "failed_conditions": failed_conditions},
+        )
+        
+        self._publish(narrative)
+        return narrative
+
+    def generate_size_reduced_narrative(
+        self,
+        symbol: str,
+        original_size: float,
+        reduced_size: float,
+        reason: str,
+        context: Dict,
+    ) -> DecisionNarrative:
+        """Create a narrative explaining why position size was reduced."""
+        import uuid
+        
+        reduction_pct = (1 - reduced_size / original_size) * 100 if original_size > 0 else 0
+        summary = f"Position size reduced by {reduction_pct:.0f}% on {symbol}."
+        detail = (
+            f"Original size: {original_size:.4f}, reduced to {reduced_size:.4f}. "
+            f"Reason: {reason}"
+        )
+        
+        narrative = DecisionNarrative(
+            narrative_id=str(uuid.uuid4())[:8],
+            timestamp=datetime.utcnow(),
+            narrative_type=NarrativeType.WHY_SIZE_REDUCED,
+            symbol=symbol,
+            summary_text=summary,
+            detailed_text=detail,
+            primary_gate="CapitalGovernor",
+            all_gates_passed=["Risk", "Bias"],
+            blocking_gate=None,
+            data_snapshot={**context, "original_size": original_size, "reduced_size": reduced_size},
+        )
+        
+        self._publish(narrative)
+        return narrative
+
+    def generate_exit_narrative(
+        self,
+        symbol: str,
+        exit_reason: str,
+        pnl: float,
+        context: Dict,
+    ) -> DecisionNarrative:
+        """Create a narrative explaining an exit decision."""
+        import uuid
+        
+        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+        summary = f"Position closed on {symbol} ({pnl_str})."
+        detail = f"Exit reason: {exit_reason}. Realized P&L: {pnl_str}."
+        
+        narrative = DecisionNarrative(
+            narrative_id=str(uuid.uuid4())[:8],
+            timestamp=datetime.utcnow(),
+            narrative_type=NarrativeType.WHY_POS_CLOSED,
+            symbol=symbol,
+            summary_text=summary,
+            detailed_text=detail,
+            primary_gate="TradeManagement",
+            all_gates_passed=["ExitCondition"],
+            blocking_gate=None,
+            data_snapshot={**context, "pnl": pnl, "exit_reason": exit_reason},
+        )
+        
+        self._publish(narrative)
+        return narrative
+
     def _publish(self, narrative: DecisionNarrative):
-        """
-        Persist and stream the narrative.
-        """
-        # 1. Log to console
+        """Persist and stream the narrative."""
+        # 1. Log to console (structured)
+        log_data = narrative.to_dict()
         if narrative.narrative_type == NarrativeType.WHY_NO_TRADE:
             logger.info(f"NARRATIVE: 🛑 {narrative.summary_text} ({narrative.detailed_text})")
+        elif narrative.narrative_type == NarrativeType.WHY_POS_CLOSED:
+            logger.info(f"NARRATIVE: 📤 {narrative.summary_text}")
+        elif narrative.narrative_type == NarrativeType.WHY_SIZE_REDUCED:
+            logger.info(f"NARRATIVE: ⚠️ {narrative.summary_text}")
         else:
             logger.info(f"NARRATIVE: ✅ {narrative.summary_text}")
             
-        # 2. Persist to DB (if available)
-        if self._db:
-            # self._db.save_narrative(narrative)
-            pass
+        # 2. Persist to state manager (if available)
+        try:
+            from .state_manager import get_state_manager
+            sm = get_state_manager()
+            key = f"narrative:{narrative.narrative_id}"
+            sm.save(key, log_data)
+        except Exception as e:
+            logger.debug(f"Could not persist narrative: {e}")
             
-        # 3. Stream to Frontend (if available)
+        # 3. Stream to Frontend via WebSocket (if available)
         if self._ws:
-            # self._ws.broadcast("narrative", narrative.to_dict())
-            pass
+            try:
+                self._ws.broadcast("narrative", log_data)
+            except Exception as e:
+                logger.debug(f"Could not stream narrative: {e}")
 
 
 # Singleton
@@ -161,3 +275,4 @@ def get_narrative_engine() -> NarrativeEngine:
     if _narrative_engine is None:
         _narrative_engine = NarrativeEngine()
     return _narrative_engine
+

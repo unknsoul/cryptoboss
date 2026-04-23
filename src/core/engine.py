@@ -41,7 +41,7 @@ class EngineStatus(Enum):
 @dataclass
 class EngineConfig:
     """Engine configuration."""
-    mode: str = "testnet"  # "live", "testnet" (paper removed)
+    mode: str = "paper"  # "paper", "live", "testnet"
     portfolio_value: float = 10000.0
     auto_recover: bool = True  # Recover strategies on restart
     heartbeat_interval: int = 60  # Seconds
@@ -121,13 +121,20 @@ class TradingEngine:
         self.event_bus = get_event_bus()
         self.risk_guardian = get_risk_guardian(portfolio_value)
         
-        # Execution router - PAPER mode removed, use TESTNET for non-live
-        exec_mode = ExecutionMode.LIVE if mode == "live" else ExecutionMode.TESTNET
+        # Execution router - supports paper, testnet, and live
+        if mode == "live":
+            exec_mode = ExecutionMode.LIVE
+        elif mode == "testnet":
+            exec_mode = ExecutionMode.TESTNET
+        else:
+            exec_mode = ExecutionMode.PAPER
+        
         self.execution_router = ExecutionRouter(
             mode=exec_mode,
             exchange_client=exchange_client,
             state_manager=self.state_manager,
-            risk_guardian=self.risk_guardian
+            risk_guardian=self.risk_guardian,
+            portfolio_value=portfolio_value,
         )
         
         # Strategy management
@@ -231,8 +238,11 @@ class TradingEngine:
     
     async def _process_price_update(self, symbol: str, price: float, df=None, index: int = 0):
         """Process a price update for all relevant strategies."""
-        # Update paper broker price
-        self.execution_router.set_price(symbol, price)
+        # Update broker price (used by PaperBroker for fill simulation)
+        try:
+            self.execution_router.set_price(symbol, price)
+        except Exception:
+            pass
         
         # Emit price tick
         emit_price_tick(self.event_bus, symbol, price)
@@ -432,7 +442,7 @@ class TradingEngine:
 
 # Factory function for easy instantiation
 def create_engine(
-    mode: str = "testnet",
+    mode: str = "paper",
     portfolio_value: float = 10000.0,
     exchange_client = None
 ) -> TradingEngine:

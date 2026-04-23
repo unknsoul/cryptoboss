@@ -313,6 +313,109 @@ class ObservabilityManager:
         """Get metrics in Prometheus format for /metrics endpoint."""
         return self.metrics.export_prometheus()
 
+    def log_trade_decision(self, decision: Dict):
+        """Log a trade decision with structured data."""
+        self.metrics.inc("trade_decisions_total", labels={"action": decision.get("action", "unknown")})
+        self.log(
+            "info",
+            f"TRADE_DECISION: {decision.get('action', 'HOLD')} {decision.get('symbol', '')}",
+            **{k: v for k, v in decision.items() if isinstance(v, (str, int, float, bool))}
+        )
+
+    def record_signal_latency(self, latency_ms: float):
+        """Record signal generation latency."""
+        self.metrics.observe("signal_latency_ms", latency_ms)
+
+    def record_order_execution_time(self, latency_ms: float):
+        """Record order execution latency."""
+        self.metrics.observe("order_execution_ms", latency_ms)
+
+    def record_tick_processing_time(self, latency_ms: float):
+        """Record tick processing latency."""
+        self.metrics.observe("tick_processing_ms", latency_ms)
+
+
+class ErrorClassifier:
+    """
+    Classifies errors into categories for structured handling.
+    
+    Categories:
+        EXCHANGE_ERROR: API/network errors from exchange
+        AUTH_ERROR: Authentication/credential errors
+        NETWORK_ERROR: Connectivity issues
+        RISK_BLOCK: Trade blocked by risk system
+        INTERNAL_ERROR: Application bugs
+    """
+    
+    CATEGORIES = {
+        "EXCHANGE_ERROR": [
+            "ExchangeError", "ExchangeNotAvailable", "RequestTimeout",
+            "BadRequest", "InsufficientFunds", "InvalidOrder",
+            "OrderNotFound", "RateLimitExceeded",
+        ],
+        "AUTH_ERROR": [
+            "AuthenticationError", "PermissionDenied", "InvalidNonce",
+            "BinanceAuthError", "BinanceConfigError",
+            "InvalidApiKey", "InvalidSignature",
+        ],
+        "NETWORK_ERROR": [
+            "ConnectionError", "TimeoutError", "ConnectionResetError",
+            "ConnectionRefusedError", "OSError", "socket.timeout",
+            "aiohttp.ClientError",
+        ],
+        "RISK_BLOCK": [
+            "RiskLimitExceeded", "EmergencyStop", "CircuitBreaker",
+            "DailyLossLimit", "WeeklyLossLimit",
+        ],
+    }
+    
+    @classmethod
+    def classify(cls, exception: Exception) -> str:
+        """
+        Classify an exception into an error category.
+        
+        Args:
+            exception: The exception to classify
+            
+        Returns:
+            Error category string
+        """
+        exc_type = type(exception).__name__
+        exc_str = str(exception).lower()
+        
+        for category, patterns in cls.CATEGORIES.items():
+            for pattern in patterns:
+                if pattern.lower() in exc_type.lower() or pattern.lower() in exc_str:
+                    return category
+        
+        # Check common patterns in message
+        if "auth" in exc_str or "key" in exc_str or "signature" in exc_str:
+            return "AUTH_ERROR"
+        if "connect" in exc_str or "timeout" in exc_str or "network" in exc_str:
+            return "NETWORK_ERROR"
+        if "risk" in exc_str or "limit" in exc_str or "blocked" in exc_str:
+            return "RISK_BLOCK"
+        if "exchange" in exc_str or "binance" in exc_str or "api" in exc_str:
+            return "EXCHANGE_ERROR"
+        
+        return "INTERNAL_ERROR"
+    
+    @classmethod
+    def classify_and_log(cls, exception: Exception, context: str = "") -> str:
+        """Classify an error and log it with the appropriate level."""
+        category = cls.classify(exception)
+        obs = get_observability()
+        obs.metrics.inc("errors_total", labels={"category": category})
+        
+        if category == "INTERNAL_ERROR":
+            obs.log("error", f"[{category}] {context}: {exception}")
+        elif category == "RISK_BLOCK":
+            obs.log("warning", f"[{category}] {context}: {exception}")
+        else:
+            obs.log("warning", f"[{category}] {context}: {exception}")
+        
+        return category
+
 
 # Singleton
 _observability: Optional[ObservabilityManager] = None
@@ -337,3 +440,8 @@ def log_error(message: str, **kwargs):
 
 def log_debug(message: str, **kwargs):
     get_observability().log("debug", message, **kwargs)
+
+def classify_error(exception: Exception, context: str = "") -> str:
+    """Convenience function to classify an error."""
+    return ErrorClassifier.classify_and_log(exception, context)
+

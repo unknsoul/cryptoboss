@@ -95,7 +95,7 @@ Phase 2 implementation goal is to ensure trade direction and context quality are
 - Frontend blocks mixed-environment rendering
 - LIVE mode UI is visually distinct (red banner)
 
-**Implementation**: [environment_guard.py](file:///d:/projects/final99/src/core/environment_guard.py)
+**Implementation**: [environment_guard.py](file:///src/core/environment_guard.py)
 
 ---
 
@@ -127,7 +127,7 @@ All strategy proposals must include 4 mandatory components:
 | `recent_performance_decay` | 25% | Time-weighted recent results |
 | `risk_alignment` | 20% | Compliance with risk rules |
 
-**Implementation**: [scoring_contract.py](file:///d:/projects/final99/src/core/scoring_contract.py)
+**Implementation**: [scoring_contract.py](file:///src/core/scoring_contract.py)
 
 ---
 
@@ -142,7 +142,7 @@ All strategy proposals must include 4 mandatory components:
 
 **Modifiers**: Volatility, drawdown level, exchange health, bias confidence
 
-**Implementation**: [capital_governor.py](file:///d:/projects/final99/src/core/capital_governor.py)
+**Implementation**: [capital_governor.py](file:///src/core/capital_governor.py)
 
 ---
 
@@ -157,7 +157,7 @@ Controls that **cannot be bypassed**:
 | `max_consecutive_losses` | Circuit breaker |
 | `kill_switch` | Emergency halt (persists across restarts) |
 
-**Implementation**: [risk_guardian.py](file:///d:/projects/final99/src/core/risk_guardian.py)
+**Implementation**: [risk_guardian.py](file:///src/core/risk_guardian.py)
 
 ---
 
@@ -175,7 +175,7 @@ Controls that **cannot be bypassed**:
 - Incident reason is always logged
 - Positions can only be reduced in FREEZE
 
-**Implementation**: [incident_state_machine.py](file:///d:/projects/final99/src/core/incident_state_machine.py)
+**Implementation**: [incident_state_machine.py](file:///src/core/incident_state_machine.py)
 
 ---
 
@@ -194,7 +194,7 @@ Controls that **cannot be bypassed**:
 - STALE data triggers warning state
 - Mixed sources forbidden in UI
 
-**Implementation**: [data_authenticity.py](file:///d:/projects/final99/src/core/data_authenticity.py)
+**Implementation**: [data_authenticity.py](file:///src/core/data_authenticity.py)
 
 ---
 
@@ -208,7 +208,7 @@ Controls that **cannot be bypassed**:
 
 **Constraint**: Operator cannot bypass risk or capital veto.
 
-**Implementation**: [operator_discipline.py](file:///d:/projects/final99/src/core/operator_discipline.py)
+**Implementation**: [operator_discipline.py](file:///src/core/operator_discipline.py)
 
 ---
 
@@ -270,4 +270,4 @@ src/core/
 ---
 
 **Version**: v11.0-FINAL  
-**Status**: PERSONAL-LIVE-READY
+**Status**: DEVELOPMENT

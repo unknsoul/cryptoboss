@@ -64,7 +64,7 @@ pytest tests/test_professional_architecture.py -v
 
 ## Documentation
 
-- **README**: [README.md](file:///d:/projects/final99/README.md)
+- **README**: [README.md](README.md)
 - **Walkthrough**: Complete implementation details
 - **Usage Guide**: Detailed code examples
 

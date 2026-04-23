@@ -138,11 +138,6 @@ export function LivePriceCard({ symbol, showDetails = true, className = '' }: Li
                 </div>
             )}
 
-            {!activeAccount && (
-                <div className="text-xs text-[#c4a052] mt-2">
-                    ⚠️ No exchange account selected
-                </div>
-            )}
         </div>
     );
 }

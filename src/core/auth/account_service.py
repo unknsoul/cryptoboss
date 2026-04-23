@@ -170,21 +170,81 @@ class ExchangeAccountService:
         """
         Validate an account's API keys with the exchange.
         
+        Calls Binance GET /api/v3/account to verify credentials.
+        Handles three error types:
+            - Invalid API key: immediate failure
+            - Invalid signature: immediate failure
+            - Network error: retry-able failure
+        
         Returns success if keys are valid.
         """
         keys = self.get_decrypted_keys(user_id, exchange_account_id)
         if not keys:
             return AccountResult(success=False, error="Could not retrieve keys")
         
-        # TODO: Actually validate with exchange
-        # For now, just mark as validated
         account = self.account_repo.find_by_id(exchange_account_id)
-        if account:
-            account.mark_validated()
-            self.account_repo.save(account)
-            return AccountResult(success=True, account=account)
+        if not account:
+            return AccountResult(success=False, error="Account not found")
         
-        return AccountResult(success=False, error="Account not found")
+        api_key, api_secret = keys
+        
+        # Validate with exchange using BinanceClient
+        try:
+            import asyncio
+            from src.exchange.binance_client import BinanceClient, BinanceAuthError, BinanceConfigError
+            
+            is_testnet = account.environment == "TESTNET"
+            client = BinanceClient(
+                api_key=api_key,
+                api_secret=api_secret,
+                testnet=is_testnet,
+            )
+            
+            # Run async validation synchronously
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            
+            if loop and loop.is_running():
+                # Already in async context — create a future
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(
+                        asyncio.run, client.validate_credentials()
+                    ).result(timeout=30)
+            else:
+                result = asyncio.run(client.validate_credentials())
+            
+            if result.get("success"):
+                account.mark_validated()
+                self.account_repo.save(account)
+                logger.info(
+                    f"✅ Account {exchange_account_id[:8]} validated "
+                    f"({result.get('environment', 'unknown')})"
+                )
+                return AccountResult(success=True, account=account)
+            else:
+                error_msg = result.get("message", "Validation failed")
+                logger.warning(f"❌ Account validation failed: {error_msg}")
+                return AccountResult(success=False, error=error_msg)
+                
+        except BinanceConfigError as e:
+            logger.error(f"Invalid API key configuration: {e}")
+            return AccountResult(success=False, error=f"Invalid API key: {e}")
+            
+        except BinanceAuthError as e:
+            logger.error(f"Authentication failed: {e}")
+            return AccountResult(success=False, error=f"Invalid credentials: {e}")
+            
+        except ConnectionError as e:
+            logger.error(f"Network error during validation: {e}")
+            return AccountResult(success=False, error=f"Network error: {e}")
+            
+        except Exception as e:
+            logger.error(f"Unexpected validation error: {e}")
+            return AccountResult(success=False, error=f"Validation failed: {e}")
 
 
 class InMemoryAccountRepository:

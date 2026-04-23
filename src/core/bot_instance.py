@@ -14,6 +14,7 @@ Bot instances NEVER share:
 If two accounts share data, the system is BROKEN.
 """
 
+import asyncio
 import logging
 import json
 import os
@@ -157,7 +158,7 @@ class BotInstance:
     - Static state
     """
     
-    def __init__(self, identity: AccountIdentity):
+    def __init__(self, identity: AccountIdentity, exchange_client=None):
         if not identity.validate():
             raise ValueError("Invalid account identity")
         
@@ -170,7 +171,10 @@ class BotInstance:
         
         # === OWN connections (NOT shared) ===
         self._ws_connection = None
-        self._exchange_client = None
+        self._exchange_client = exchange_client  # Injected BinanceClient instance
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._price_stream_task: Optional[asyncio.Task] = None
+        self._max_reconnect_delay = 30  # seconds
         
         # === OWN storage path ===
         self._storage_path = identity.storage_path
@@ -180,7 +184,7 @@ class BotInstance:
         
         logger.info(f"🤖 BotInstance created for {identity.exchange_account_id[:8]}...")
     
-    def start(self) -> bool:
+    async def start(self) -> bool:
         """
         Start this bot instance.
         
@@ -203,17 +207,17 @@ class BotInstance:
         # Step 2: Clear price cache (empty on start)
         self.price_cache.clear()
         
-        # Step 3: Connect to exchange (TODO: implement)
-        self._connect_exchange()
+        # Step 3: Connect to exchange (if client provided)
+        await self._connect_exchange()
         
-        # Step 4: Start price stream (TODO: implement)
-        self._start_price_stream()
+        # Step 4: Start price stream (if exchange connected)
+        await self._start_price_stream()
         
         self.state = BotInstanceState.RUNNING
         logger.info(f"✅ Bot instance running for {self.identity.exchange_account_id[:8]}")
         return True
     
-    def stop(self) -> bool:
+    async def stop(self) -> bool:
         """
         Stop this bot instance.
         
@@ -232,11 +236,11 @@ class BotInstance:
         # Step 1: Save state
         self._save_state()
         
-        # Step 2: Close websockets
-        self._stop_price_stream()
+        # Step 2: Stop price stream
+        await self._stop_price_stream()
         
         # Step 3: Disconnect exchange
-        self._disconnect_exchange()
+        await self._disconnect_exchange()
         
         self.state = BotInstanceState.STOPPED
         logger.info(f"✅ Bot instance stopped for {self.identity.exchange_account_id[:8]}")
@@ -250,9 +254,15 @@ class BotInstance:
         """
         logger.warning(f"🗑️ Destroying bot instance for {self.identity.exchange_account_id[:8]}...")
         
-        # Stop if running
+        # Stop if running (synchronous cleanup path for destroy)
         if self.state == BotInstanceState.RUNNING:
-            self.stop()
+            self.state = BotInstanceState.STOPPING
+            self._save_state()
+            # Cancel async tasks
+            if self._price_stream_task and not self._price_stream_task.done():
+                self._price_stream_task.cancel()
+            if self._reconnect_task and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
         
         # Clear all state
         self.trading_state.reset()
@@ -304,27 +314,110 @@ class BotInstance:
         except Exception as e:
             logger.error(f"Failed to save state: {e}")
     
-    # === Exchange Connection (placeholders) ===
+    # === Exchange Connection ===
     
-    def _connect_exchange(self):
+    async def _connect_exchange(self):
         """Connect to exchange for THIS account."""
-        logger.debug("Connecting to exchange...")
-        # TODO: Implement actual exchange connection
+        if not self._exchange_client:
+            logger.info("No exchange client provided — running without exchange connection")
+            return
+        
+        try:
+            logger.info("Connecting to exchange...")
+            await self._exchange_client.connect()
+            logger.info("✅ Exchange connected")
+        except Exception as e:
+            logger.error(f"Exchange connection failed: {e}")
+            # Schedule reconnect with backoff
+            self._schedule_reconnect()
     
-    def _disconnect_exchange(self):
+    async def _disconnect_exchange(self):
         """Disconnect from exchange."""
-        logger.debug("Disconnecting from exchange...")
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+        
+        if self._exchange_client:
+            try:
+                await self._exchange_client.close()
+            except Exception as e:
+                logger.warning(f"Error closing exchange client: {e}")
         self._exchange_client = None
+        logger.debug("Disconnected from exchange")
     
-    def _start_price_stream(self):
+    async def _start_price_stream(self):
         """Start price websocket for THIS account."""
-        logger.debug("Starting price stream...")
-        # TODO: Implement price stream
+        if not self._exchange_client:
+            logger.info("No exchange client — skipping price stream")
+            return
+        
+        logger.info("Starting price stream...")
+        self._price_stream_task = asyncio.create_task(self._price_stream_loop())
     
-    def _stop_price_stream(self):
+    async def _stop_price_stream(self):
         """Stop price websocket."""
-        logger.debug("Stopping price stream...")
+        if self._price_stream_task and not self._price_stream_task.done():
+            self._price_stream_task.cancel()
+            try:
+                await self._price_stream_task
+            except asyncio.CancelledError:
+                pass
+        self._price_stream_task = None
         self._ws_connection = None
+        logger.debug("Price stream stopped")
+    
+    async def _price_stream_loop(self):
+        """Main price stream loop with automatic reconnection."""
+        symbols = ["BTC/USDT", "ETH/USDT"]  # Default symbols
+        
+        while self.state in (BotInstanceState.STARTING, BotInstanceState.RUNNING):
+            try:
+                if hasattr(self._exchange_client, 'start_price_feed'):
+                    await self._exchange_client.start_price_feed(symbols, interval=5.0)
+                    
+                    # Subscribe to price updates
+                    for symbol in symbols:
+                        self._exchange_client.subscribe_price(
+                            symbol,
+                            lambda s, p: self.price_cache.update(s, p, datetime.now())
+                        )
+                else:
+                    # Fallback: poll prices periodically
+                    while self.state == BotInstanceState.RUNNING:
+                        for symbol in symbols:
+                            try:
+                                price = await self._exchange_client.get_price(symbol)
+                                if price > 0:
+                                    self.price_cache.update(symbol, price, datetime.now())
+                            except Exception as e:
+                                logger.debug(f"Price fetch failed for {symbol}: {e}")
+                        await asyncio.sleep(5.0)
+                        
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Price stream error: {e}")
+                await self._reconnect_with_backoff()
+    
+    def _schedule_reconnect(self):
+        """Schedule a reconnection attempt."""
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        self._reconnect_task = asyncio.create_task(self._reconnect_with_backoff())
+    
+    async def _reconnect_with_backoff(self):
+        """Reconnect to exchange with exponential backoff."""
+        delay = 1.0
+        while self.state in (BotInstanceState.STARTING, BotInstanceState.RUNNING):
+            logger.info(f"Reconnecting in {delay:.0f}s...")
+            await asyncio.sleep(delay)
+            
+            try:
+                await self._exchange_client.connect()
+                logger.info("✅ Reconnected to exchange")
+                return
+            except Exception as e:
+                logger.warning(f"Reconnection failed: {e}")
+                delay = min(delay * 2, self._max_reconnect_delay)
     
     # === Trading Operations ===
     

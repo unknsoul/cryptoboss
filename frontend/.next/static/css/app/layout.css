@@ -668,6 +668,12 @@ video {
 .h-6 {
   height: 1.5rem;
 }
+.h-64 {
+  height: 16rem;
+}
+.h-72 {
+  height: 18rem;
+}
 .h-8 {
   height: 2rem;
 }
@@ -683,8 +689,23 @@ video {
 .h-screen {
   height: 100vh;
 }
+.max-h-56 {
+  max-height: 14rem;
+}
+.max-h-72 {
+  max-height: 18rem;
+}
+.max-h-96 {
+  max-height: 24rem;
+}
 .max-h-\[600px\] {
   max-height: 600px;
+}
+.max-h-\[85vh\] {
+  max-height: 85vh;
+}
+.min-h-\[180px\] {
+  min-height: 180px;
 }
 .min-h-screen {
   min-height: 100vh;
@@ -719,9 +740,6 @@ video {
 .w-3\/4 {
   width: 75%;
 }
-.w-32 {
-  width: 8rem;
-}
 .w-4 {
   width: 1rem;
 }
@@ -746,8 +764,11 @@ video {
 .w-px {
   width: 1px;
 }
-.min-w-\[200px\] {
-  min-width: 200px;
+.min-w-full {
+  min-width: 100%;
+}
+.max-w-3xl {
+  max-width: 48rem;
 }
 .max-w-4xl {
   max-width: 56rem;
@@ -794,11 +815,11 @@ video {
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+.cursor-grab {
+  cursor: grab;
+}
 .cursor-help {
   cursor: help;
-}
-.cursor-not-allowed {
-  cursor: not-allowed;
 }
 .cursor-pointer {
   cursor: pointer;
@@ -818,11 +839,14 @@ video {
 .grid-cols-1 {
   grid-template-columns: repeat(1, minmax(0, 1fr));
 }
+.grid-cols-12 {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
 .grid-cols-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.grid-cols-4 {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.grid-cols-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 .flex-col {
   flex-direction: column;
@@ -832,6 +856,9 @@ video {
 }
 .items-start {
   align-items: flex-start;
+}
+.items-end {
+  align-items: flex-end;
 }
 .items-center {
   align-items: center;
@@ -907,6 +934,9 @@ video {
   --tw-divide-opacity: 1;
   border-color: rgb(31 41 55 / var(--tw-divide-opacity, 1));
 }
+.overflow-auto {
+  overflow: auto;
+}
 .overflow-hidden {
   overflow: hidden;
 }
@@ -944,9 +974,6 @@ video {
 .border-b {
   border-bottom-width: 1px;
 }
-.border-l {
-  border-left-width: 1px;
-}
 .border-l-4 {
   border-left-width: 4px;
 }
@@ -956,8 +983,15 @@ video {
 .border-t {
   border-top-width: 1px;
 }
+.border-dashed {
+  border-style: dashed;
+}
 .border-dotted {
   border-style: dotted;
+}
+.border-\[\#1a1f26\] {
+  --tw-border-opacity: 1;
+  border-color: rgb(26 31 38 / var(--tw-border-opacity, 1));
 }
 .border-\[\#2d3640\] {
   --tw-border-opacity: 1;
@@ -985,6 +1019,9 @@ video {
 .border-\[\#c4a052\] {
   --tw-border-opacity: 1;
   border-color: rgb(196 160 82 / var(--tw-border-opacity, 1));
+}
+.border-\[\#c4a052\]\/40 {
+  border-color: rgb(196 160 82 / 0.4);
 }
 .border-\[\#c4a052\]\/50 {
   border-color: rgb(196 160 82 / 0.5);
@@ -1104,6 +1141,9 @@ video {
 }
 .bg-\[\#5b7a9d\]\/20 {
   background-color: rgb(91 122 157 / 0.2);
+}
+.bg-\[\#5b7a9d\]\/30 {
+  background-color: rgb(91 122 157 / 0.3);
 }
 .bg-\[\#6b7280\] {
   --tw-bg-opacity: 1;
@@ -1323,9 +1363,6 @@ video {
   -webkit-background-clip: text;
           background-clip: text;
 }
-.p-1 {
-  padding: 0.25rem;
-}
 .p-1\.5 {
   padding: 0.375rem;
 }
@@ -1407,6 +1444,9 @@ video {
   padding-top: 2rem;
   padding-bottom: 2rem;
 }
+.pb-1 {
+  padding-bottom: 0.25rem;
+}
 .pb-2 {
   padding-bottom: 0.5rem;
 }
@@ -1416,14 +1456,11 @@ video {
 .pl-16 {
   padding-left: 4rem;
 }
-.pl-3 {
-  padding-left: 0.75rem;
-}
-.pl-44 {
-  padding-left: 11rem;
-}
 .pl-56 {
   padding-left: 14rem;
+}
+.pr-1 {
+  padding-right: 0.25rem;
 }
 .pr-10 {
   padding-right: 2.5rem;
@@ -1511,6 +1548,17 @@ video {
 }
 .tracking-wider {
   letter-spacing: 0.05em;
+}
+.tracking-widest {
+  letter-spacing: 0.1em;
+}
+.text-\[\#0f1419\] {
+  --tw-text-opacity: 1;
+  color: rgb(15 20 25 / var(--tw-text-opacity, 1));
+}
+.text-\[\#4a5568\] {
+  --tw-text-opacity: 1;
+  color: rgb(74 85 104 / var(--tw-text-opacity, 1));
 }
 .text-\[\#4a9268\] {
   --tw-text-opacity: 1;
@@ -2476,10 +2524,6 @@ a:focus-visible {
   --tw-bg-opacity: 1;
   background-color: rgb(107 138 173 / var(--tw-bg-opacity, 1));
 }
-.hover\:bg-\[\#b66464\]:hover {
-  --tw-bg-opacity: 1;
-  background-color: rgb(182 100 100 / var(--tw-bg-opacity, 1));
-}
 .hover\:bg-accent-green\/80:hover {
   background-color: rgb(0 200 83 / 0.8);
 }
@@ -2534,10 +2578,6 @@ a:focus-visible {
 .hover\:text-\[\#7a99bd\]:hover {
   --tw-text-opacity: 1;
   color: rgb(122 153 189 / var(--tw-text-opacity, 1));
-}
-.hover\:text-\[\#a65454\]:hover {
-  --tw-text-opacity: 1;
-  color: rgb(166 84 84 / var(--tw-text-opacity, 1));
 }
 .hover\:text-\[\#c77777\]:hover {
   --tw-text-opacity: 1;

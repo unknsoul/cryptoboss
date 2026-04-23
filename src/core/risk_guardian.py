@@ -42,11 +42,14 @@ class RiskLimits:
     max_open_orders_per_strategy: int = 10
     
     # Portfolio Limits
-    max_daily_loss_usd: float = 1000.0
+    max_daily_loss_usd: float = 500.0
     max_daily_loss_pct: float = 5.0
+    max_weekly_loss_usd: float = 1500.0
     max_weekly_loss_pct: float = 15.0
     max_position_concentration_pct: float = 40.0  # Max 40% in any single asset
     max_total_open_orders: int = 50
+    max_concurrent_trades: int = 5  # Max open positions at same time
+    risk_per_trade_pct: float = 2.0  # Max 2% of portfolio per trade
     
     # Circuit Breakers
     max_consecutive_errors: int = 5
@@ -113,6 +116,7 @@ class RiskGuardian:
         
         # Position tracking
         self.positions: Dict[str, float] = {}  # symbol -> value in USD
+        self._open_positions: Dict[str, float] = {}  # symbol -> quantity (for concurrent check)
         
         # Order tracking
         self.recent_orders: List[datetime] = []
@@ -156,6 +160,14 @@ class RiskGuardian:
             if order_value > self.limits.max_order_value_usd:
                 return False, f"Order value ${order_value:,.0f} exceeds max ${self.limits.max_order_value_usd:,.0f}"
             
+            # Per-trade risk check
+            max_risk_value = self.portfolio_value * (self.limits.risk_per_trade_pct / 100)
+            if order_value > max_risk_value:
+                return False, (
+                    f"Order value ${order_value:,.0f} exceeds {self.limits.risk_per_trade_pct}% "
+                    f"per-trade risk limit (${max_risk_value:,.0f})"
+                )
+            
             # Daily loss check
             if abs(self.state.daily_pnl) >= self.limits.max_daily_loss_usd:
                 return False, f"Daily loss limit reached (${abs(self.state.daily_pnl):,.0f})"
@@ -163,6 +175,21 @@ class RiskGuardian:
             daily_loss_pct = abs(self.state.daily_pnl) / self.portfolio_value * 100
             if daily_loss_pct >= self.limits.max_daily_loss_pct:
                 return False, f"Daily loss {daily_loss_pct:.1f}% exceeds max {self.limits.max_daily_loss_pct}%"
+            
+            # Weekly loss check
+            if abs(self.state.weekly_pnl) >= self.limits.max_weekly_loss_usd:
+                return False, f"Weekly loss limit reached (${abs(self.state.weekly_pnl):,.0f})"
+            
+            weekly_loss_pct = abs(self.state.weekly_pnl) / self.portfolio_value * 100
+            if weekly_loss_pct >= self.limits.max_weekly_loss_pct:
+                return False, f"Weekly loss {weekly_loss_pct:.1f}% exceeds max {self.limits.max_weekly_loss_pct}%"
+            
+            # Max concurrent trades check
+            active_positions = len([q for q in self._open_positions.values() if abs(q) > 0])
+            if active_positions >= self.limits.max_concurrent_trades:
+                return False, (
+                    f"Max concurrent trades reached ({active_positions}/{self.limits.max_concurrent_trades})"
+                )
             
             # Strategy allocation check
             strategy_id = order_intent.strategy_id
@@ -263,6 +290,21 @@ class RiskGuardian:
             self.state.consecutive_errors = 0
             logger.info("Trading resumed after emergency stop")
     
+    def record_position_open(self, symbol: str, quantity: float):
+        """Record that a position was opened."""
+        with self._lock:
+            self._open_positions[symbol] = self._open_positions.get(symbol, 0) + quantity
+            logger.debug(f"Position opened: {symbol} qty={quantity}")
+    
+    def record_position_close(self, symbol: str, quantity: float = 0):
+        """Record that a position was closed."""
+        with self._lock:
+            if quantity > 0:
+                self._open_positions[symbol] = self._open_positions.get(symbol, 0) - quantity
+            else:
+                self._open_positions.pop(symbol, None)
+            logger.debug(f"Position closed: {symbol}")
+    
     def get_risk_report(self) -> Dict:
         """Generate current risk status report."""
         return {
@@ -275,9 +317,12 @@ class RiskGuardian:
             "portfolio_value": self.portfolio_value,
             "total_allocated": sum(self.strategy_allocations.values()),
             "strategy_count": len(self.strategy_allocations),
+            "open_positions": len([q for q in self._open_positions.values() if abs(q) > 0]),
             "limits": {
                 "max_daily_loss_pct": self.limits.max_daily_loss_pct,
                 "max_order_value_usd": self.limits.max_order_value_usd,
+                "max_concurrent_trades": self.limits.max_concurrent_trades,
+                "risk_per_trade_pct": self.limits.risk_per_trade_pct,
                 "circuit_breaker_threshold": self.limits.max_consecutive_errors
             }
         }

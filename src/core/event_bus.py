@@ -85,6 +85,7 @@ class Event:
 @dataclass
 class PriceTick(Event):
     """Price tick event."""
+    event_type: EventType = EventType.PRICE_TICK
     symbol: str = ""
     price: float = 0.0
     volume: float = 0.0
@@ -97,6 +98,7 @@ class PriceTick(Event):
 @dataclass
 class OrderEvent(Event):
     """Order-related event."""
+    event_type: EventType = EventType.ORDER_PLACED
     order_id: str = ""
     symbol: str = ""
     side: str = ""

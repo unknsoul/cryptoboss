@@ -1,9 +1,11 @@
 {
-  "/replay/page": "app/replay/page.js",
-  "/auth/login/page": "app/auth/login/page.js",
-  "/live/page": "app/live/page.js",
-  "/risk/page": "app/risk/page.js",
+  "/drift/page": "app/drift/page.js",
   "/page": "app/page.js",
-  "/logs/page": "app/logs/page.js",
-  "/positions/page": "app/positions/page.js"
+  "/smc/page": "app/smc/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/live/page": "app/live/page.js",
+  "/decisions/page": "app/decisions/page.js",
+  "/context/page": "app/context/page.js",
+  "/scalper/page": "app/scalper/page.js",
+  "/builder/page": "app/builder/page.js"
 }

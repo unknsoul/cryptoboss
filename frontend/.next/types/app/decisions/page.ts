@@ -1,4 +1,4 @@
-// File: D:\projects\final99\frontend\app\decisions\page.tsx
+// File: C:\Users\hardi\Downloads\cryptoboss-main\frontend\app\decisions\page.tsx
 import * as entry from '../../../../app/decisions/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

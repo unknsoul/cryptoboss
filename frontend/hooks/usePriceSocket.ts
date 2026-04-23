@@ -72,12 +72,8 @@ export function usePriceSocket(options: UsePriceSocketOptions = {}): UsePriceSoc
     }, []);
 
     const connect = useCallback(() => {
-        // Don't connect without an account
-        if (!accountId) {
-            setStatus('disconnected');
-            setError('No exchange account selected');
-            return;
-        }
+        // Use default account if none selected
+        const connectId = accountId || 'default';
 
         // Don't reconnect if already connecting/connected
         if (wsRef.current?.readyState === WebSocket.CONNECTING ||
@@ -90,7 +86,7 @@ export function usePriceSocket(options: UsePriceSocketOptions = {}): UsePriceSoc
 
         try {
             const symbolsParam = symbols.join(',');
-            const wsUrl = `${WS_BASE}/ws/prices?account=${accountId}&symbols=${symbolsParam}`;
+            const wsUrl = `${WS_BASE}/ws/prices?account=${connectId}&symbols=${symbolsParam}`;
 
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
@@ -185,16 +181,13 @@ export function usePriceSocket(options: UsePriceSocketOptions = {}): UsePriceSoc
 
     // Auto-connect when account changes
     useEffect(() => {
-        if (autoConnect && accountId) {
+        if (autoConnect) {
             // Disconnect previous connection
             disconnect();
             // Clear prices for new account
             clearPrices();
-            // Connect to new account
+            // Connect
             connect();
-        } else if (!accountId) {
-            disconnect();
-            clearPrices();
         }
 
         return () => {
