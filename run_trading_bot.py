@@ -30,6 +30,9 @@ from src.core import (
 )
 from src.core.integration_hub import TelegramIntegration, DiscordIntegration
 from src.strategies.dca_strategy import DCAStrategy
+from src.strategies.range_scalp import RangeScalpStrategy
+from src.strategies.smc_scalper import SMCScalperStrategy
+from src.strategies.smc_trend_follow import SMCTrendFollowStrategy
 from src.exchange.binance_client import BinanceClient, create_binance_client
 
 # Setup logging
@@ -109,7 +112,7 @@ def parse_args():
     )
     parser.add_argument(
         "--strategy",
-        choices=["dca", "grid", "all"],
+        choices=["dca", "smc_trend_follow", "smc_scalper", "range_scalp", "all"],
         default="dca",
         help="Strategy to run (default: dca)"
     )
@@ -148,10 +151,15 @@ async def setup_integrations():
 
 def create_strategies(args, engine):
     """Create and add strategies to the engine."""
-    allocation_per_strategy = args.capital / len(args.symbols)
+    selected_strategies = (
+        ["dca", "smc_trend_follow", "smc_scalper", "range_scalp"]
+        if args.strategy == "all"
+        else [args.strategy]
+    )
+    allocation_per_strategy = args.capital / max(1, len(args.symbols) * len(selected_strategies))
     
     for symbol in args.symbols:
-        if args.strategy in ("dca", "all"):
+        if "dca" in selected_strategies:
             # DCA Strategy
             dca = DCAStrategy(
                 base_order_size=allocation_per_strategy * 0.05,  # 5% per order
@@ -170,6 +178,39 @@ def create_strategies(args, engine):
                 auto_start=True
             )
             logger.info(f"Added DCA strategy for {symbol}")
+
+        if "smc_trend_follow" in selected_strategies:
+            trend = SMCTrendFollowStrategy(symbol=symbol)
+            engine.add_strategy(
+                strategy_id=f"smc_trend_{symbol.replace('/', '_').lower()}",
+                strategy=trend,
+                symbol=symbol,
+                allocation=allocation_per_strategy,
+                auto_start=True,
+            )
+            logger.info(f"Added SMC trend-follow strategy for {symbol}")
+
+        if "smc_scalper" in selected_strategies:
+            scalper = SMCScalperStrategy(symbol=symbol)
+            engine.add_strategy(
+                strategy_id=f"smc_scalper_{symbol.replace('/', '_').lower()}",
+                strategy=scalper,
+                symbol=symbol,
+                allocation=allocation_per_strategy,
+                auto_start=True,
+            )
+            logger.info(f"Added SMC scalper strategy for {symbol}")
+
+        if "range_scalp" in selected_strategies:
+            range_scalp = RangeScalpStrategy(symbol=symbol)
+            engine.add_strategy(
+                strategy_id=f"range_scalp_{symbol.replace('/', '_').lower()}",
+                strategy=range_scalp,
+                symbol=symbol,
+                allocation=allocation_per_strategy,
+                auto_start=True,
+            )
+            logger.info(f"Added range scalp strategy for {symbol}")
 
 
 async def main():

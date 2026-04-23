@@ -1,0 +1,67 @@
+strategies:
+  selection_method: regime_and_bias_driven
+  proposal_only: true
+  active:
+    - SMC_TREND_FOLLOW
+    - SMC_SCALPER
+    - RANGE_SCALP
+
+  SMC_TREND_FOLLOW:
+    module: src/strategies/smc_trend_follow.py
+    class: SMCTrendFollowStrategy
+    enabled: true
+    regimes:
+      - TRENDING_BULLISH
+      - TRENDING_BEARISH
+    sessions:
+      - LONDON
+      - NEW_YORK
+      - OVERLAP
+    entry_tf: 15m
+    confluence_tfs:
+      - 4h
+      - 1h
+    min_confluence: 0.65
+    hard_max_sl_pct: 2.0
+
+  SMC_SCALPER:
+    module: src/strategies/smc_scalper.py
+    class: SMCScalperStrategy
+    enabled: true
+    regimes:
+      - TRENDING_BULLISH
+      - TRENDING_BEARISH
+      - RANGING
+    sessions:
+      - OVERLAP
+      - LONDON
+      - NEW_YORK
+    symbols:
+      - BTCUSDT
+      - ETHUSDT
+      - SOLUSDT
+      - BNBUSDT
+    entry_tf: 5m
+    confluence_tfs:
+      - 1h
+      - 15m
+    min_confluence: 0.65
+    max_hold_minutes: 120
+    max_trades_per_session: 3
+    hard_max_sl_pct: 0.8
+
+  RANGE_SCALP:
+    module: src/strategies/range_scalp.py
+    class: RangeScalpStrategy
+    enabled: true
+    regimes:
+      - RANGING
+    sessions:
+      - LONDON
+      - NEW_YORK
+    entry_tf: 15m
+    range_definition_tf: 1h
+    min_confluence: 0.60
+    max_trades_per_range: 4
+    range_invalidation_close_pct: 0.30
+    hard_max_sl_pct: 1.5

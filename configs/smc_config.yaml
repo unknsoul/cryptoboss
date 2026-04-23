@@ -1,0 +1,79 @@
+smc_engine:
+  module: src/analysis/smc_engine.py
+  class: SMCEngine
+  enabled: true
+
+  order_blocks:
+    min_impulse_atr_mult: 1.5
+    ob_must_precede_bos: true
+    min_body_pct: 0.40
+    breaker_blocks_enabled: true
+    mitigation:
+      full_mitigation_threshold_pct: 50
+      partial_threshold_pct: 30
+      invalidated_on_full_close_through: true
+    scoring_weights:
+      freshness: 0.35
+      impulse_strength: 0.35
+      sr_confluence: 0.30
+    max_age_candles:
+      1d: 50
+      4h: 100
+      1h: 200
+      15m: 300
+      5m: 400
+
+  fair_value_gaps:
+    min_gap_atr_mult: 0.30
+    min_gap_price_pct: 0.05
+    inverse_fvg_enabled: true
+    fill_levels:
+      equilibrium_50pct: true
+      full_fill_invalidates: true
+      partial_fill_threshold: 0.50
+    scoring_weights:
+      size: 0.40
+      freshness: 0.35
+      htf_alignment: 0.25
+    max_age_candles:
+      4h: 80
+      1h: 150
+      15m: 250
+      5m: 350
+
+  liquidity:
+    equal_hl_tolerance_pct: 0.15
+    equal_hl_min_touches: 2
+    equal_hl_lookback: 50
+    sweep_detection:
+      wick_extension_min_atr: 0.30
+      close_back_inside_required: true
+      volume_spike_preferred: true
+      volume_spike_multiplier: 1.50
+
+  premium_discount:
+    premium_threshold_fib: 0.618
+    discount_threshold_fib: 0.382
+    optimal_entry_zone:
+      - 0.618
+      - 0.786
+    fib_levels:
+      - 0
+      - 0.236
+      - 0.382
+      - 0.5
+      - 0.618
+      - 0.705
+      - 0.786
+      - 1.0
+
+market_structure_engine:
+  module: src/analysis/market_structure.py
+  class: MarketStructureEngine
+  swing_lookback_candles: 20
+  swing_pivot_confirmation_candles: 3
+  minimum_swing_size_atr_multiplier: 0.5
+  structure_event_weights:
+    BOS: 0.70
+    CHOCH: 0.90
+    MSB: 1.00

@@ -1,0 +1,3152 @@
+{
+  "_metadata": {
+    "version": "v12.0-PRODUCTION-FINAL",
+    "schema": "cryptoboss-master-config-v12",
+    "created": "2026-04-23",
+    "repo": "https://github.com/unknsoul/cryptoboss",
+    "upgrades_from": "v11.0-FINAL (ARCHITECTURE.md) + v10.0 (architecture_analysis.md) + v1.0.0 (RELEASE.md)",
+    "status": "TESTING-READY",
+    "builds_on_confirmed_modules": [
+      "TradingEngine",
+      "MarketContextEngine",
+      "ContextStateMachine",
+      "BiasEngine",
+      "TradePermissionFilter",
+      "ScoringContract",
+      "MLContainment",
+      "CapitalGovernor",
+      "ExchangeHealthMonitor",
+      "RiskStatePersistence",
+      "ColdStartController",
+      "ReplayEngine",
+      "DecisionLogger",
+      "RiskGuardian",
+      "ExecutionRouter"
+    ],
+    "new_modules_added": [
+      "SMCEngine",
+      "MarketStructureEngine",
+      "SMCTrendFollowStrategy",
+      "SMCScalperStrategy",
+      "RangeScalpStrategy",
+      "TradeManagementEngine",
+      "AIIntelligenceAdvisor",
+      "PerformanceAnalyticsEngine"
+    ],
+    "philosophy": "Survival first. Structure-based entries. Context governs all. No forced trades. Every decision explainable."
+  },
+  "system": {
+    "name": "CryptoBoss",
+    "version": "v12.0",
+    "mode": "paper",
+    "environment": "testnet",
+    "exchange": "binance",
+    "base_currency": "USDT",
+    "initial_capital_usdt": 10000.0,
+    "max_concurrent_positions": 3,
+    "allow_simultaneous_long_short": false,
+    "startup_mode": "cold_start_with_validation",
+    "health_check_interval_seconds": 30,
+    "main_loop_interval_seconds": 5,
+    "data_fetch_concurrency": 5,
+    "timezone": "UTC",
+    "cold_start_warmup_seconds": 300,
+    "min_data_quality_pct": 95.0,
+    "enable_replay_engine": true,
+    "enable_paper_slippage": true,
+    "enable_paper_fees": true
+  },
+  "environment_config": {
+    "live": {
+      "rest": "https://api.binance.com/api",
+      "ws": "wss://stream.binance.com:9443/ws",
+      "tag": "LIVE_EXCHANGE",
+      "banner_color": "#EF4444",
+      "banner_text": "\u00e2\u0161\u00a0\u00ef\u00b8\u008f LIVE \u00e2\u20ac\u201d REAL MONEY"
+    },
+    "testnet": {
+      "rest": "https://testnet.binance.vision/api",
+      "ws": "wss://testnet.binance.vision/ws",
+      "tag": "TESTNET_EXCHANGE",
+      "banner_color": "#F59E0B",
+      "banner_text": "TESTNET \u00e2\u20ac\u201d Simulated Funds"
+    },
+    "paper": {
+      "rest": null,
+      "ws": "wss://stream.binance.com:9443/ws",
+      "tag": "SIMULATED",
+      "banner_color": "#3B82F6",
+      "banner_text": "PAPER \u00e2\u20ac\u201d No Real Money"
+    },
+    "rules": {
+      "immutable_after_startup": true,
+      "mixed_env_blocked": true,
+      "stale_data_threshold_seconds": 60,
+      "stale_action": "WARN_AND_BLOCK_NEW_ENTRIES",
+      "api_key_revocation_triggers_freeze": true,
+      "timestamp_drift_max_seconds": 10
+    }
+  },
+  "symbols": [
+    {
+      "pair": "BTCUSDT",
+      "rank": 1,
+      "enabled": true,
+      "max_position_usdt": 2000,
+      "tick_size": 0.01,
+      "lot_step": 1e-05,
+      "volatility_profile": "HIGH",
+      "scalping_enabled": true,
+      "preferred_sessions": [
+        "LONDON",
+        "NEW_YORK",
+        "OVERLAP"
+      ]
+    },
+    {
+      "pair": "ETHUSDT",
+      "rank": 2,
+      "enabled": true,
+      "max_position_usdt": 2000,
+      "tick_size": 0.01,
+      "lot_step": 0.0001,
+      "volatility_profile": "HIGH",
+      "scalping_enabled": true,
+      "preferred_sessions": [
+        "LONDON",
+        "NEW_YORK",
+        "OVERLAP"
+      ]
+    },
+    {
+      "pair": "SOLUSDT",
+      "rank": 3,
+      "enabled": true,
+      "max_position_usdt": 1500,
+      "tick_size": 0.001,
+      "lot_step": 0.01,
+      "volatility_profile": "VERY_HIGH",
+      "scalping_enabled": true,
+      "preferred_sessions": [
+        "LONDON",
+        "NEW_YORK",
+        "OVERLAP"
+      ]
+    },
+    {
+      "pair": "BNBUSDT",
+      "rank": 4,
+      "enabled": true,
+      "max_position_usdt": 1500,
+      "tick_size": 0.01,
+      "lot_step": 0.001,
+      "volatility_profile": "HIGH",
+      "scalping_enabled": true,
+      "preferred_sessions": [
+        "LONDON",
+        "NEW_YORK"
+      ]
+    },
+    {
+      "pair": "XRPUSDT",
+      "rank": 5,
+      "enabled": true,
+      "max_position_usdt": 1000,
+      "tick_size": 0.0001,
+      "lot_step": 0.1,
+      "volatility_profile": "HIGH",
+      "scalping_enabled": false,
+      "preferred_sessions": [
+        "LONDON",
+        "NEW_YORK"
+      ]
+    }
+  ],
+  "data_pipeline": {
+    "module": "src/data/pipeline.py",
+    "class": "DataPipeline",
+    "provider": "binance_ccxt",
+    "cache": "memory",
+    "redis_enabled": false,
+    "timeframes": [
+      "1m",
+      "5m",
+      "15m",
+      "1h",
+      "4h",
+      "1d",
+      "1w"
+    ],
+    "max_candles_per_tf": 500,
+    "warmup_candles": 200,
+    "normalization": true,
+    "event_on_close": "OHLCV_UPDATED",
+    "authenticity_tagging": true,
+    "retry_attempts": 3,
+    "retry_backoff_seconds": 2,
+    "rate_limit_rpm": 1200,
+    "timeframe_weights": {
+      "1w": 1.0,
+      "1d": 0.95,
+      "4h": 0.85,
+      "1h": 0.75,
+      "15m": 0.6,
+      "5m": 0.45,
+      "1m": 0.3
+    }
+  },
+  "multi_timeframe_analysis": {
+    "htf_primary": "1d",
+    "htf_secondary": "4h",
+    "mtf_primary": "1h",
+    "mtf_secondary": "15m",
+    "ltf_entry": "5m",
+    "ltf_scalp": "1m",
+    "cascade_rule": "HTF_BIAS_GOVERNS_ALL",
+    "alignment_requirements": {
+      "swing": [
+        "1d",
+        "4h",
+        "1h"
+      ],
+      "intraday": [
+        "4h",
+        "1h",
+        "15m"
+      ],
+      "scalp": [
+        "1h",
+        "15m",
+        "5m"
+      ]
+    },
+    "min_aligned_tfs": 3,
+    "conflict_action": "NO_TRADE",
+    "partial_alignment_score_penalty": 0.3
+  },
+  "market_structure_engine": {
+    "module": "src/analysis/market_structure.py",
+    "class": "MarketStructureEngine",
+    "enabled": true,
+    "swing_lookback": 20,
+    "pivot_confirmation_bars": 3,
+    "min_swing_size_atr_mult": 0.5,
+    "structure_events": {
+      "BOS": {
+        "significance": "trend_continuation",
+        "body_close_required": true,
+        "weight": 0.7
+      },
+      "CHoCH": {
+        "significance": "potential_reversal",
+        "body_close_required": true,
+        "weight": 0.9
+      },
+      "MSB": {
+        "significance": "strong_reversal",
+        "body_close_required": true,
+        "weight": 1.0
+      }
+    },
+    "trend_states": {
+      "BULLISH_TRENDING": "HH+HL intact, last BOS bullish",
+      "BEARISH_TRENDING": "LH+LL intact, last BOS bearish",
+      "RANGING": "No clear pattern, oscillating",
+      "ACCUMULATION": "HL holds forming, CHoCH pending bullish",
+      "DISTRIBUTION": "LH failures at resistance, CHoCH pending bearish"
+    },
+    "invalidation_on_swing_fail": true,
+    "methods": {
+      "detect_swings": "identify pivot_high/pivot_low using lookback windows",
+      "classify_bos": "check if close breaks last swing_high (bull BOS) or swing_low (bear BOS)",
+      "classify_choch": "detect opposing structure break after trend leg",
+      "get_trend_state": "return TrendState enum from swing sequence analysis",
+      "get_structure_snapshot": "return MarketStructureSnapshot dataclass per timeframe"
+    }
+  },
+  "smc_engine": {
+    "module": "src/analysis/smc_engine.py",
+    "class": "SMCEngine",
+    "enabled": true,
+    "order_blocks": {
+      "bullish_ob_definition": "Last bearish candle before strong bullish BOS impulse",
+      "bearish_ob_definition": "Last bullish candle before strong bearish BOS impulse",
+      "min_impulse_atr_mult": 1.5,
+      "ob_must_precede_bos": true,
+      "min_body_pct": 0.4,
+      "breaker_blocks_enabled": true,
+      "breaker_definition": "Mitigated OB that price closes through \u00e2\u20ac\u201d polarity flips",
+      "mitigation": {
+        "full_mitigation_threshold_pct": 50,
+        "partial_threshold_pct": 30,
+        "invalidated_on_full_close_through": true
+      },
+      "scoring_weights": {
+        "freshness": 0.35,
+        "impulse_strength": 0.35,
+        "sr_confluence": 0.3
+      },
+      "max_age_candles": {
+        "1d": 50,
+        "4h": 100,
+        "1h": 200,
+        "15m": 300,
+        "5m": 400
+      },
+      "require_displacement_return": true,
+      "methods": {
+        "detect_obs": "returns List[OrderBlock] for given OHLCV + timeframe",
+        "is_price_inside_ob": "bool \u00e2\u20ac\u201d is current price within OB range",
+        "get_ob_mitigation_level": "float \u00e2\u20ac\u201d 50% of OB body",
+        "invalidate_ob": "removes OB from active list",
+        "score_ob": "float 0-1 composite quality score"
+      }
+    },
+    "fair_value_gaps": {
+      "fvg_definition": "3-candle gap: candle[i-1].high < candle[i+1].low (bull FVG) or candle[i-1].low > candle[i+1].high (bear FVG)",
+      "min_gap_atr_mult": 0.3,
+      "min_gap_price_pct": 0.05,
+      "inverse_fvg_enabled": true,
+      "fill_levels": {
+        "equilibrium_50pct": true,
+        "full_fill_invalidates": true,
+        "partial_fill_threshold": 0.5
+      },
+      "scoring_weights": {
+        "size": 0.4,
+        "freshness": 0.35,
+        "htf_alignment": 0.25
+      },
+      "max_age_candles": {
+        "4h": 80,
+        "1h": 150,
+        "15m": 250,
+        "5m": 350
+      },
+      "methods": {
+        "detect_fvgs": "returns List[FVG] for OHLCV data",
+        "is_fvg_filled": "bool \u00e2\u20ac\u201d has price returned to fill gap",
+        "get_fvg_midpoint": "float \u00e2\u20ac\u201d 50% fill level",
+        "score_fvg": "float 0-1 quality score"
+      }
+    },
+    "liquidity": {
+      "bsl_definition": "Equal highs, prior swing highs, trendline highs \u00e2\u20ac\u201d stops above price",
+      "ssl_definition": "Equal lows, prior swing lows, trendline lows \u00e2\u20ac\u201d stops below price",
+      "equal_hl_tolerance_pct": 0.15,
+      "equal_hl_min_touches": 2,
+      "equal_hl_lookback": 50,
+      "sweep_detection": {
+        "wick_extension_min_atr": 0.3,
+        "close_back_inside_required": true,
+        "volume_spike_preferred": true,
+        "volume_spike_multiplier": 1.5
+      },
+      "liquidity_void": {
+        "enabled": true,
+        "definition": "Price gap with no orders \u00e2\u20ac\u201d magnetic for return"
+      },
+      "methods": {
+        "find_bsl_zones": "returns List[LiquidityZone] \u00e2\u20ac\u201d BSL above price",
+        "find_ssl_zones": "returns List[LiquidityZone] \u00e2\u20ac\u201d SSL below price",
+        "detect_sweep": "returns SweepEvent if liquidity recently taken",
+        "get_nearest_liquidity": "returns closest BSL and SSL targets"
+      }
+    },
+    "premium_discount": {
+      "reference": "last_major_swing_leg",
+      "premium_threshold_fib": 0.618,
+      "discount_threshold_fib": 0.382,
+      "optimal_entry_zone": [
+        0.618,
+        0.786
+      ],
+      "fib_levels": [
+        0,
+        0.236,
+        0.382,
+        0.5,
+        0.618,
+        0.705,
+        0.786,
+        1.0
+      ],
+      "bias_aligned_only": true,
+      "methods": {
+        "get_zone": "returns PremiumDiscountZone enum (PREMIUM/DISCOUNT/EQUILIBRIUM)",
+        "get_fib_level": "float \u00e2\u20ac\u201d nearest fibonacci level to price",
+        "is_in_oez": "bool \u00e2\u20ac\u201d is price in Optimal Entry Zone 61.8-78.6%"
+      }
+    },
+    "displacement": {
+      "definition": "Strong impulse candle: large body, min wick, high volume",
+      "min_body_pct_of_range": 0.7,
+      "min_atr_mult": 1.5,
+      "required_before_entry": true
+    },
+    "inducement": {
+      "enabled": true,
+      "definition": "Small liquidity pool swept before real move \u00e2\u20ac\u201d do NOT enter on inducement",
+      "wait_for_secondary_confirmation": true
+    }
+  },
+  "market_context_engine": {
+    "module": "src/core/market_context_engine.py",
+    "class": "MarketContextEngine",
+    "update_interval_seconds": 60,
+    "htf_inputs": [
+      "1d",
+      "4h"
+    ],
+    "regime_indicators": {
+      "ADX": {
+        "period": 14,
+        "trend_threshold": 25,
+        "strong_threshold": 40,
+        "weight": 0.3
+      },
+      "ATR_normalized": {
+        "period": 14,
+        "high_vol_threshold": 0.025,
+        "weight": 0.25
+      },
+      "Hurst_exponent": {
+        "lookback": 100,
+        "trending_thresh": 0.55,
+        "mean_rev_thresh": 0.45,
+        "weight": 0.2
+      },
+      "volume_trend": {
+        "period": 20,
+        "weight": 0.15
+      },
+      "bb_compression": {
+        "period": 20,
+        "compression_threshold": 0.02,
+        "weight": 0.1
+      }
+    },
+    "regimes": {
+      "TRENDING_BULLISH": {
+        "capital_pct": 100,
+        "strategy": "SMC_TREND_FOLLOW",
+        "allowed": true
+      },
+      "TRENDING_BEARISH": {
+        "capital_pct": 100,
+        "strategy": "SMC_TREND_FOLLOW",
+        "allowed": true
+      },
+      "RANGING": {
+        "capital_pct": 75,
+        "strategy": "RANGE_SCALP",
+        "allowed": true
+      },
+      "HIGH_VOLATILITY": {
+        "capital_pct": 30,
+        "strategy": "VOLATILITY_WATCH",
+        "allowed": false
+      },
+      "LOW_VOLATILITY": {
+        "capital_pct": 50,
+        "strategy": "ACCUMULATION_WATCH",
+        "allowed": false
+      },
+      "NO_TRADE": {
+        "capital_pct": 0,
+        "strategy": null,
+        "allowed": false
+      }
+    },
+    "key_level_extraction": {
+      "sources": [
+        "swing_highs_lows",
+        "OB_zones",
+        "FVG_zones",
+        "round_numbers",
+        "daily_open",
+        "weekly_open",
+        "monthly_open"
+      ],
+      "min_touches": 2,
+      "proximity_alert_pct": 0.3
+    },
+    "sessions": {
+      "ASIA": {
+        "utc_open": "00:00",
+        "utc_close": "09:00",
+        "liquidity": "LOW",
+        "quality": "MODERATE"
+      },
+      "LONDON": {
+        "utc_open": "08:00",
+        "utc_close": "16:00",
+        "liquidity": "HIGH",
+        "quality": "HIGH"
+      },
+      "NEW_YORK": {
+        "utc_open": "13:00",
+        "utc_close": "21:00",
+        "liquidity": "HIGHEST",
+        "quality": "HIGHEST"
+      },
+      "OVERLAP": {
+        "utc_open": "13:00",
+        "utc_close": "16:00",
+        "liquidity": "HIGHEST",
+        "quality": "HIGHEST"
+      }
+    },
+    "news_blackout_minutes": {
+      "before": 30,
+      "after": 30
+    },
+    "methods": {
+      "get_current_context": "MarketContext(regime, key_levels, session, volatility_state, structure_state)",
+      "get_regime": "MarketRegime enum",
+      "get_key_levels": "List[KeyLevel] sorted by significance",
+      "get_session": "TradingSession enum"
+    }
+  },
+  "bias_engine": {
+    "module": "src/core/bias_engine.py",
+    "class": "BiasEngine",
+    "htf_sources": [
+      "1d",
+      "4h"
+    ],
+    "component_weights": {
+      "HTF_structure": 0.35,
+      "OB_location": 0.25,
+      "FVG_fill_direction": 0.2,
+      "liquidity_swept": 0.2
+    },
+    "confidence_levels": {
+      "HIGH": {
+        "min_score": 0.75,
+        "capital_mult": 1.0
+      },
+      "MEDIUM": {
+        "min_score": 0.5,
+        "capital_mult": 0.7
+      },
+      "LOW": {
+        "min_score": 0.25,
+        "capital_mult": 0.0
+      },
+      "NEUTRAL": {
+        "min_score": 0.0,
+        "capital_mult": 0.0
+      }
+    },
+    "anti_bias_block": true,
+    "flip_cooldown_minutes": 120,
+    "update_interval_seconds": 300,
+    "conflict_action": "NO_TRADE",
+    "minimum_required": "MEDIUM",
+    "methods": {
+      "get_current_bias": "TradeBias(direction, confidence, score, reasoning)",
+      "is_bias_valid_for": "bool \u00e2\u20ac\u201d is proposed direction aligned with bias"
+    }
+  },
+  "context_state_machine": {
+    "module": "src/core/context_state_machine.py",
+    "class": "ContextStateMachine",
+    "min_state_duration_minutes": 120,
+    "valid_transitions": {
+      "TRENDING_BULLISH": [
+        "RANGING",
+        "HIGH_VOLATILITY",
+        "NO_TRADE"
+      ],
+      "TRENDING_BEARISH": [
+        "RANGING",
+        "HIGH_VOLATILITY",
+        "NO_TRADE"
+      ],
+      "RANGING": [
+        "TRENDING_BULLISH",
+        "TRENDING_BEARISH",
+        "HIGH_VOLATILITY",
+        "NO_TRADE"
+      ],
+      "HIGH_VOLATILITY": [
+        "RANGING",
+        "TRENDING_BULLISH",
+        "TRENDING_BEARISH",
+        "NO_TRADE"
+      ],
+      "NO_TRADE": [
+        "RANGING",
+        "TRENDING_BULLISH",
+        "TRENDING_BEARISH"
+      ]
+    },
+    "hysteresis_enabled": true,
+    "hysteresis_bars": 3,
+    "all_transitions_logged": true
+  },
+  "trade_permission_filter": {
+    "module": "src/core/trade_permission_filter.py",
+    "class": "TradePermissionFilter",
+    "gates": [
+      {
+        "id": "G1",
+        "name": "Regime Gate",
+        "check": "regime != NO_TRADE",
+        "veto": true,
+        "msg": "Market is NO_TRADE \u00e2\u20ac\u201d blocked"
+      },
+      {
+        "id": "G2",
+        "name": "Bias Gate",
+        "check": "bias_confidence >= MEDIUM AND direction == bias",
+        "veto": true,
+        "msg": "Direction conflicts with HTF bias or confidence too low"
+      },
+      {
+        "id": "G3",
+        "name": "Session Gate",
+        "check": "session.quality in [HIGH,HIGHEST]",
+        "veto": false,
+        "msg": "Low-liquidity session",
+        "penalty": 0.5
+      },
+      {
+        "id": "G4",
+        "name": "Confluence Gate",
+        "check": "confluence_score >= 0.65",
+        "veto": true,
+        "msg": "Confluence below 65% minimum"
+      },
+      {
+        "id": "G5",
+        "name": "Structure Zone Gate",
+        "check": "entry_at_OB OR entry_at_FVG OR entry_at_liquidity_zone",
+        "veto": true,
+        "msg": "Entry not at structural zone (OB/FVG/Liquidity)"
+      },
+      {
+        "id": "G6",
+        "name": "Liquidity Sweep Gate",
+        "check": "prior_liquidity_swept_in_direction",
+        "veto": false,
+        "msg": "No liquidity sweep detected",
+        "penalty": 0.2
+      },
+      {
+        "id": "G7",
+        "name": "Displacement Gate",
+        "check": "displacement_candle_present",
+        "veto": false,
+        "msg": "No displacement candle \u00e2\u20ac\u201d wait for confirmation",
+        "penalty": 0.3
+      },
+      {
+        "id": "G8",
+        "name": "Risk/RR Gate",
+        "check": "rr_ratio >= 2.0 AND sl_beyond_structure",
+        "veto": true,
+        "msg": "R:R below 2.0 or SL not beyond structural invalidation"
+      },
+      {
+        "id": "G9",
+        "name": "Exchange Health Gate",
+        "check": "exchange_health in [NORMAL,DEGRADED]",
+        "veto": true,
+        "msg": "Exchange health degraded beyond acceptable threshold"
+      }
+    ],
+    "all_veto_gates_must_pass": true,
+    "log_every_gate_result": true,
+    "narrative_required": true
+  },
+  "strategies": {
+    "selection_method": "regime_and_bias_driven",
+    "proposal_only": true,
+    "active": [
+      "SMC_TREND_FOLLOW",
+      "SMC_SCALPER",
+      "RANGE_SCALP"
+    ],
+    "SMC_TREND_FOLLOW": {
+      "module": "src/strategies/smc_trend_follow.py",
+      "class": "SMCTrendFollowStrategy",
+      "enabled": true,
+      "regimes": [
+        "TRENDING_BULLISH",
+        "TRENDING_BEARISH"
+      ],
+      "sessions": [
+        "LONDON",
+        "NEW_YORK",
+        "OVERLAP"
+      ],
+      "entry_tf": "15m",
+      "confluence_tfs": [
+        "4h",
+        "1h"
+      ],
+      "long_conditions": [
+        "1D + 4H bias BULLISH",
+        "Price in discount zone (below 50% of last major swing)",
+        "Bullish OB identified on 1H or 15M",
+        "Prior SSL swept (sellside taken)",
+        "Displacement bullish candle from OB",
+        "FVG present at or above OB (confluence)",
+        "15M CHoCH bullish confirmed",
+        "No significant resistance within 1x SL distance above"
+      ],
+      "short_conditions": [
+        "1D + 4H bias BEARISH",
+        "Price in premium zone (above 50% of last major swing)",
+        "Bearish OB identified on 1H or 15M",
+        "Prior BSL swept (buyside taken)",
+        "Displacement bearish candle from OB",
+        "FVG present at or below OB (confluence)",
+        "15M CHoCH bearish confirmed",
+        "No significant support within 1x SL distance below"
+      ],
+      "entry": {
+        "type": "limit",
+        "zone": "OB_50pct_to_OB_low",
+        "trigger": "5M_close_back_above_OB_50pct"
+      },
+      "sl": {
+        "method": "below_OB_low_plus_buffer",
+        "buffer_atr_mult": 0.2,
+        "invalidation": "below_displacement_origin",
+        "hard_max_pct": 2.0
+      },
+      "tp": {
+        "method": "multi_target",
+        "targets": [
+          {
+            "id": "TP1",
+            "target": "prior_swing_BSL_SSL",
+            "pct": 40,
+            "min_rr": 2.0,
+            "action_after": "move_sl_to_be"
+          },
+          {
+            "id": "TP2",
+            "target": "next_HTF_OB_or_FVG",
+            "pct": 35,
+            "min_rr": 3.5,
+            "action_after": "activate_trail"
+          },
+          {
+            "id": "TP3",
+            "target": "next_major_liquidity",
+            "pct": 25,
+            "min_rr": 5.0,
+            "action_after": "close_remainder"
+          }
+        ]
+      },
+      "confluence_weights": {
+        "HTF_OB": 0.2,
+        "LTF_OB": 0.15,
+        "FVG": 0.15,
+        "liquidity_swept": 0.2,
+        "displacement": 0.1,
+        "CHoCH_LTF": 0.1,
+        "session_quality": 0.05,
+        "round_number": 0.05
+      },
+      "min_confluence": 0.65,
+      "proposal_fields": {
+        "context_fit": "regime_match * bias_alignment * session_quality",
+        "historical_expectancy": "win_rate * avg_rr (backtest min 6 months)",
+        "recent_performance_decay": "time_weighted_last_20_trades",
+        "risk_alignment": "sl_valid * rr_valid * size_within_limits"
+      }
+    },
+    "SMC_SCALPER": {
+      "module": "src/strategies/smc_scalper.py",
+      "class": "SMCScalperStrategy",
+      "enabled": true,
+      "regimes": [
+        "TRENDING_BULLISH",
+        "TRENDING_BEARISH",
+        "RANGING"
+      ],
+      "sessions": [
+        "OVERLAP",
+        "LONDON",
+        "NEW_YORK"
+      ],
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "BNBUSDT"
+      ],
+      "entry_tf": "5m",
+      "confluence_tfs": [
+        "1h",
+        "15m"
+      ],
+      "max_hold_minutes": 120,
+      "max_trades_per_session": 3,
+      "long_conditions": [
+        "1H bias BULLISH",
+        "5M OB at discount zone",
+        "Micro SSL swept on 1M or 5M",
+        "Bullish displacement from 5M OB",
+        "1M CHoCH bullish inside OB zone"
+      ],
+      "short_conditions": [
+        "1H bias BEARISH",
+        "5M OB at premium zone",
+        "Micro BSL swept on 1M or 5M",
+        "Bearish displacement from 5M OB",
+        "1M CHoCH bearish inside OB zone"
+      ],
+      "entry": {
+        "type": "market_on_trigger",
+        "trigger": "1M_CHoCH_confirmed"
+      },
+      "sl": {
+        "method": "below_5M_OB_low_plus_buffer",
+        "buffer_atr_mult": 0.15,
+        "hard_max_pct": 0.8
+      },
+      "tp": {
+        "targets": [
+          {
+            "id": "TP1",
+            "target": "nearest_micro_liquidity",
+            "pct": 60,
+            "min_rr": 2.0,
+            "action_after": "move_sl_to_be"
+          },
+          {
+            "id": "TP2",
+            "target": "15M_key_level",
+            "pct": 40,
+            "min_rr": 3.0,
+            "action_after": "close_remainder"
+          }
+        ]
+      },
+      "time_exit": {
+        "enabled": true,
+        "max_minutes": 120,
+        "no_new_last_30min_session": true
+      },
+      "confluence_weights": {
+        "1H_OB_alignment": 0.25,
+        "5M_OB": 0.2,
+        "micro_liquidity_swept": 0.2,
+        "1M_CHoCH": 0.2,
+        "FVG_nearby": 0.15
+      },
+      "min_confluence": 0.65
+    },
+    "RANGE_SCALP": {
+      "module": "src/strategies/range_scalp.py",
+      "class": "RangeScalpStrategy",
+      "enabled": true,
+      "regimes": [
+        "RANGING"
+      ],
+      "sessions": [
+        "LONDON",
+        "NEW_YORK"
+      ],
+      "entry_tf": "15m",
+      "range_definition_tf": "1h",
+      "max_trades_per_range": 4,
+      "range_invalidation_close_pct": 0.3,
+      "long_conditions": [
+        "Price at range low support OB",
+        "Min 2 bounces from support",
+        "Bullish displacement",
+        "No bearish OB overhead within 1.5x SL"
+      ],
+      "short_conditions": [
+        "Price at range high resistance OB",
+        "Min 2 rejections from resistance",
+        "Bearish displacement",
+        "No bullish OB below within 1.5x SL"
+      ],
+      "entry": {
+        "type": "limit",
+        "zone": "OB_50pct"
+      },
+      "sl": {
+        "method": "outside_range_boundary_plus_buffer",
+        "buffer_atr_mult": 0.3,
+        "hard_max_pct": 1.5
+      },
+      "tp": {
+        "targets": [
+          {
+            "id": "TP1",
+            "target": "range_midpoint",
+            "pct": 50,
+            "min_rr": 1.5,
+            "action_after": "move_sl_to_be"
+          },
+          {
+            "id": "TP2",
+            "target": "opposite_boundary",
+            "pct": 50,
+            "min_rr": 2.5,
+            "action_after": "close_remainder"
+          }
+        ]
+      }
+    }
+  },
+  "scoring_contract": {
+    "module": "src/core/scoring_contract.py",
+    "class": "ScoringContract",
+    "components": {
+      "context_fit": {
+        "weight": 0.3,
+        "min_score": 0.5,
+        "description": "Regime + session + trend alignment"
+      },
+      "historical_expectancy": {
+        "weight": 0.25,
+        "min_rr": 2.0,
+        "min_win_rate": 0.45,
+        "description": "Backtest track record"
+      },
+      "recent_performance_decay": {
+        "weight": 0.25,
+        "decay_half_life_trades": 10,
+        "cooldown_after_n_losses": 3,
+        "description": "Recent results time-weighted"
+      },
+      "risk_alignment": {
+        "weight": 0.2,
+        "hard_rules_must_pass": true,
+        "description": "SL/TP/size compliance"
+      }
+    },
+    "min_composite_score": 0.65,
+    "below_threshold_action": "REJECT_WITH_LOG",
+    "max_proposals_per_cycle": 3,
+    "proposal_expiry_seconds": 30,
+    "ml_max_influence_pct": 30,
+    "unnormalized_proposals_rejected": true
+  },
+  "capital_governor": {
+    "module": "src/core/capital_governor.py",
+    "class": "CapitalGovernor",
+    "total_capital_usdt": 10000,
+    "max_deployed_pct": 60,
+    "per_symbol_max_pct": 20,
+    "base_risk_per_trade_pct": 1.0,
+    "sizing_method": "fixed_risk_percentage",
+    "kelly_enabled": false,
+    "regime_multipliers": {
+      "TRENDING_BULLISH": 1.0,
+      "TRENDING_BEARISH": 1.0,
+      "RANGING": 0.75,
+      "HIGH_VOLATILITY": 0.3,
+      "NO_TRADE": 0.0
+    },
+    "bias_confidence_multipliers": {
+      "HIGH": 1.0,
+      "MEDIUM": 0.7,
+      "LOW": 0.0,
+      "NEUTRAL": 0.0
+    },
+    "drawdown_schedule": {
+      "5pct": {
+        "mult": 0.8,
+        "new_positions": true
+      },
+      "10pct": {
+        "mult": 0.5,
+        "new_positions": true
+      },
+      "15pct": {
+        "mult": 0.25,
+        "new_positions": false,
+        "reduce_only": true
+      },
+      "20pct": {
+        "mult": 0.0,
+        "new_positions": false,
+        "halt_trading": true
+      }
+    },
+    "consecutive_loss_reduction": {
+      "enabled": true,
+      "after_n_losses": 2,
+      "reduce_pct_per_loss": 25,
+      "reset_on_win": true
+    },
+    "budget_limits": {
+      "max_trades_per_day": 10,
+      "max_trades_per_context": 3,
+      "max_losses_per_bias": 2
+    }
+  },
+  "risk_guardian": {
+    "module": "src/core/risk_guardian.py",
+    "class": "RiskGuardian",
+    "kill_switch": {
+      "enabled": true,
+      "persists_across_restarts": true,
+      "requires_operator_ack_to_resume": true
+    },
+    "order_level": {
+      "max_usdt": 2000,
+      "min_usdt": 10,
+      "max_slippage_pct": 0.3,
+      "max_spread_pct": 0.15
+    },
+    "strategy_level": {
+      "max_drawdown_pct": 10,
+      "max_allocation_pct": 40,
+      "min_rr": 2.0,
+      "max_sl_pct": 2.5,
+      "min_sl_pct": 0.1
+    },
+    "portfolio_level": {
+      "max_daily_dd_pct": 3.0,
+      "max_weekly_dd_pct": 6.0,
+      "max_monthly_dd_pct": 15.0,
+      "max_exposure_pct": 60,
+      "max_correlated_positions": 2,
+      "max_consecutive_losses": 5,
+      "circuit_breaker_cooldown_minutes": 240
+    },
+    "funding_rate_guard": {
+      "enabled": true,
+      "max_pct": 0.1,
+      "no_new_entries_if_exceeded": true
+    },
+    "volatility_guard": {
+      "enabled": true,
+      "max_atr_pct_new_entries": 5.0
+    }
+  },
+  "trade_management_engine": {
+    "module": "src/core/trade_management_engine.py",
+    "class": "TradeManagementEngine",
+    "breakeven": {
+      "trigger": "when_TP1_hit",
+      "move_to": "entry_plus_fees",
+      "buffer_ticks": 3
+    },
+    "trailing_stop": {
+      "enabled": true,
+      "activation": "after_TP1_hit",
+      "method": "structure_based",
+      "long_trail": "below_last_confirmed_swing_low",
+      "short_trail": "above_last_confirmed_swing_high",
+      "atr_trail_mult": 1.5,
+      "fallback": "atr_trailing",
+      "min_lock_in_profit_pct": 0.5
+    },
+    "partial_exits": [
+      {
+        "trigger": "TP1_hit",
+        "close_pct": 40,
+        "action": "move_sl_to_be"
+      },
+      {
+        "trigger": "TP2_hit",
+        "close_pct": 35,
+        "action": "activate_trail"
+      },
+      {
+        "trigger": "TP3_hit",
+        "close_pct": 25,
+        "action": "close_remainder"
+      }
+    ],
+    "time_management": {
+      "reduce_after_24h_holding": {
+        "enabled": true,
+        "reduce_pct": 50
+      },
+      "force_close_at_session_end": false
+    },
+    "adverse_move": {
+      "structure_invalidated_action": "close_immediately",
+      "opposite_signal_action": "evaluate_close"
+    }
+  },
+  "exchange_health_monitor": {
+    "module": "src/core/exchange_health_monitor.py",
+    "class": "ExchangeHealthMonitor",
+    "stages": {
+      "NORMAL": {
+        "trading": "FULL",
+        "auto_trigger": "no_errors_last_5min"
+      },
+      "DEGRADED_REDUCED": {
+        "trading": "50pct_size",
+        "auto_trigger": "3_errors_in_5min OR latency>2s"
+      },
+      "DEGRADED_CLOSE": {
+        "trading": "CLOSE_ONLY",
+        "auto_trigger": "5_errors_in_5min OR latency>5s"
+      },
+      "HALTED": {
+        "trading": "NONE",
+        "auto_trigger": "max_failures OR kill_switch"
+      }
+    },
+    "recovery": {
+      "cooldown_minutes": 10,
+      "requires_manual_from_halted": true
+    },
+    "checks": {
+      "latency_ms_warning": 500,
+      "latency_ms_critical": 2000,
+      "consecutive_errors_warning": 3
+    }
+  },
+  "risk_state_persistence": {
+    "module": "src/core/risk_state_persistence.py",
+    "class": "RiskStatePersistence",
+    "backend": "sqlite",
+    "db_path": "data/risk_state.db",
+    "checkpoint_interval_seconds": 30,
+    "checksum_validation": true,
+    "recovery_strategy": "restore_and_verify_open_positions"
+  },
+  "cold_start_controller": {
+    "module": "src/core/cold_start_controller.py",
+    "class": "ColdStartController",
+    "warmup_seconds": 300,
+    "required_checks": [
+      "exchange_connectivity",
+      "api_key_validity",
+      "data_feed_healthy",
+      "open_positions_reconciled",
+      "risk_state_loaded",
+      "config_checksum_valid",
+      "min_candles_loaded",
+      "bias_engine_warm"
+    ],
+    "fail_on_any_check_failure": true,
+    "ui_progress_reporting": true
+  },
+  "decision_logger": {
+    "module": "src/core/decision_logger.py",
+    "class": "DecisionLogger",
+    "log_every_gate": true,
+    "log_all_vetoes": true,
+    "log_approved_full_context": true,
+    "include_confluence_scores": true,
+    "include_indicator_snapshot": true,
+    "include_ai_narrative": true,
+    "outputs": [
+      "jsonl",
+      "sqlite"
+    ],
+    "jsonl_path": "logs/decisions.jsonl",
+    "db_table": "decision_log",
+    "retention_days": 90,
+    "mandatory_outputs": {
+      "why_trade_allowed": "approval reasoning narrative",
+      "why_trade_blocked": "veto gate + reason",
+      "why_no_trade": "market condition explanation",
+      "which_gate_failed": "gate ID reference",
+      "why_size_changed": "capital governor sizing explanation"
+    }
+  },
+  "incident_state_machine": {
+    "module": "src/core/incident_state_machine.py",
+    "states": {
+      "NORMAL": {
+        "trading": "FULL",
+        "exit_requires": "auto"
+      },
+      "DEGRADED": {
+        "trading": "REDUCED_50",
+        "exit_requires": "auto"
+      },
+      "INCIDENT_FREEZE": {
+        "trading": "REDUCE_ONLY",
+        "exit_requires": "operator_ack"
+      },
+      "HALTED": {
+        "trading": "NONE",
+        "exit_requires": "operator_ack+manual"
+      }
+    },
+    "auto_transitions": {
+      "NORMAL\u00e2\u2020\u2019DEGRADED": "3_consecutive_errors OR latency>2s",
+      "DEGRADED\u00e2\u2020\u2019INCIDENT_FREEZE": "5_errors OR daily_loss>2pct",
+      "INCIDENT_FREEZE\u00e2\u2020\u2019HALTED": "kill_switch OR daily_loss>3pct",
+      "HALTED\u00e2\u2020\u2019NORMAL": "operator_ack_required+10min_cooldown"
+    }
+  },
+  "ml_containment": {
+    "module": "src/core/ml_containment.py",
+    "rules": {
+      "ml_outputs_features_only": true,
+      "blocked_output_patterns": [
+        "entry_signal",
+        "buy_signal",
+        "sell_signal",
+        "EntryProposal"
+      ],
+      "max_ml_influence_pct": 30,
+      "all_ml_usage_logged": true
+    }
+  },
+  "ai_intelligence": {
+    "enabled": true,
+    "module": "src/analysis/ai_intelligence.py",
+    "class": "AIIntelligenceAdvisor",
+    "role": "ADVISORY_ONLY",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "OPENAI_API_KEY",
+    "fail_gracefully": true,
+    "timeout_seconds": 10,
+    "weight_in_confluence_score": 0.15,
+    "functions": {
+      "market_narrative": {
+        "enabled": true,
+        "interval_minutes": 30,
+        "prompt": "You are a professional SMC trader analyzing {symbol}. HTF Bias: {bias}, Structure: {structure}, OBs: {order_blocks}, FVGs: {fvgs}, Liquidity: {liquidity}, Regime: {regime}, Session: {session}. Provide JSON: {next_target, key_levels, premium_or_discount, direction_confidence_0_to_1, narrative_summary}",
+        "output_field": "ai_narrative"
+      },
+      "sentiment_filter": {
+        "enabled": true,
+        "interval_minutes": 60,
+        "prompt": "Rate market sentiment for {symbol} from -1 (extremely bearish) to +1 (extremely bullish) based on: {headlines}. Return JSON: {score, key_themes, risk_event_detected}",
+        "output_field": "ai_sentiment",
+        "risk_event_blocks_new_entries": true
+      }
+    }
+  },
+  "indicators": {
+    "module": "src/analysis/indicators.py",
+    "class": "IndicatorEngine",
+    "compute_on_close": true,
+    "trend": {
+      "EMA_20": {
+        "period": 20
+      },
+      "EMA_50": {
+        "period": 50
+      },
+      "EMA_200": {
+        "period": 200
+      },
+      "SMA_200": {
+        "period": 200
+      },
+      "Supertrend": {
+        "period": 10,
+        "mult": 3.0
+      }
+    },
+    "momentum": {
+      "RSI": {
+        "period": 14,
+        "ob": 70,
+        "os": 30
+      },
+      "MACD": {
+        "fast": 12,
+        "slow": 26,
+        "signal": 9
+      },
+      "Stoch": {
+        "k": 14,
+        "d": 3,
+        "smooth": 3
+      }
+    },
+    "volatility": {
+      "ATR": {
+        "period": 14
+      },
+      "BB": {
+        "period": 20,
+        "std": 2.0
+      },
+      "Keltner": {
+        "period": 20,
+        "atr_mult": 2.0
+      }
+    },
+    "volume": {
+      "OBV": true,
+      "VWAP": {
+        "reset": "daily"
+      },
+      "CVD": true,
+      "VolumeProfile": {
+        "lookback_days": 5,
+        "poc": true,
+        "vah_val": true
+      }
+    },
+    "structure": {
+      "PivotHighs": {
+        "left": 5,
+        "right": 5
+      },
+      "PivotLows": {
+        "left": 5,
+        "right": 5
+      }
+    }
+  },
+  "execution": {
+    "module": "src/core/execution_router.py",
+    "class": "ExecutionRouter",
+    "default_order_type": "limit",
+    "limit_timeout_seconds": 60,
+    "cancel_and_market_on_timeout": true,
+    "paper_slippage": {
+      "mean_pct": 0.05,
+      "std_pct": 0.02,
+      "market_impact": true
+    },
+    "paper_fees": {
+      "maker_pct": 0.02,
+      "taker_pct": 0.04
+    },
+    "live_slippage": {
+      "max_acceptable_pct": 0.3,
+      "reject_if_exceeded": true
+    },
+    "retry": {
+      "enabled": true,
+      "max_retries": 3,
+      "backoff_seconds": 1
+    },
+    "rate_limits": {
+      "per_minute": 20,
+      "per_10_seconds": 5
+    }
+  },
+  "performance_analytics": {
+    "module": "src/analysis/performance_analytics.py",
+    "class": "PerformanceAnalyticsEngine",
+    "rolling_windows": [
+      5,
+      10,
+      20,
+      50
+    ],
+    "metrics_computed": [
+      "total_pnl_usdt",
+      "total_pnl_pct",
+      "win_rate",
+      "loss_rate",
+      "total_trades",
+      "avg_win_usdt",
+      "avg_loss_usdt",
+      "profit_factor",
+      "sharpe_ratio",
+      "sortino_ratio",
+      "max_drawdown_pct",
+      "max_drawdown_duration_bars",
+      "calmar_ratio",
+      "avg_rr_achieved",
+      "avg_rr_planned",
+      "expectancy_per_trade",
+      "best_trade_usdt",
+      "worst_trade_usdt",
+      "consecutive_wins_max",
+      "consecutive_losses_max",
+      "long_win_rate",
+      "short_win_rate",
+      "pnl_by_symbol",
+      "pnl_by_strategy",
+      "pnl_by_session",
+      "pnl_by_regime",
+      "avg_hold_duration_minutes",
+      "trades_per_day_avg",
+      "monthly_returns"
+    ],
+    "update_interval_seconds": 30,
+    "persist_to_db": true,
+    "db_table": "performance_snapshots"
+  },
+  "backtesting": {
+    "engine": "event_driven_custom",
+    "fallback_engine": "vectorbt",
+    "default_capital": 10000,
+    "commission_pct": 0.04,
+    "slippage_pct": 0.05,
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "BNBUSDT",
+      "XRPUSDT"
+    ],
+    "default_period": {
+      "start": "2023-01-01",
+      "end": "2025-12-31"
+    },
+    "walk_forward": {
+      "enabled": true,
+      "training_months": 6,
+      "test_months": 2,
+      "min_periods": 3
+    },
+    "monte_carlo": {
+      "enabled": true,
+      "simulations": 1000,
+      "confidence_level": 0.95
+    },
+    "targets": {
+      "sharpe_min": 1.5,
+      "win_rate_min_pct": 45,
+      "max_dd_max_pct": 20,
+      "pf_min": 1.5,
+      "avg_rr_min": 2.0
+    },
+    "report_output": "data/backtest_reports/"
+  },
+  "api_routes": {
+    "framework": "fastapi",
+    "host": "0.0.0.0",
+    "port": 8000,
+    "module": "src/api/routes.py",
+    "websocket_port": 8001,
+    "cors_origins": [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ],
+    "endpoints": {
+      "system": [
+        {
+          "method": "GET",
+          "path": "/health",
+          "desc": "System health summary"
+        },
+        {
+          "method": "GET",
+          "path": "/health/detailed",
+          "desc": "Full component health status"
+        },
+        {
+          "method": "GET",
+          "path": "/status",
+          "desc": "Current trading status, mode, environment"
+        },
+        {
+          "method": "GET",
+          "path": "/startup-progress",
+          "desc": "Cold start progress and checklist"
+        },
+        {
+          "method": "POST",
+          "path": "/operator/pause",
+          "desc": "Pause trading (requires reason)",
+          "auth": true
+        },
+        {
+          "method": "POST",
+          "path": "/operator/resume",
+          "desc": "Resume trading (requires reason)",
+          "auth": true
+        },
+        {
+          "method": "POST",
+          "path": "/operator/acknowledge-incident",
+          "desc": "Acknowledge incident (requires reason)",
+          "auth": true
+        },
+        {
+          "method": "POST",
+          "path": "/operator/kill-switch",
+          "desc": "Activate emergency kill switch",
+          "auth": true
+        }
+      ],
+      "market": [
+        {
+          "method": "GET",
+          "path": "/market/context/{symbol}",
+          "desc": "Current market context for symbol"
+        },
+        {
+          "method": "GET",
+          "path": "/market/bias/{symbol}",
+          "desc": "Current HTF bias for symbol"
+        },
+        {
+          "method": "GET",
+          "path": "/market/regime",
+          "desc": "All symbols regime overview"
+        },
+        {
+          "method": "GET",
+          "path": "/market/sessions",
+          "desc": "Current session + upcoming sessions"
+        },
+        {
+          "method": "GET",
+          "path": "/market/key-levels/{symbol}",
+          "desc": "Active key levels for symbol"
+        },
+        {
+          "method": "GET",
+          "path": "/market/structure/{symbol}/{tf}",
+          "desc": "Market structure per timeframe"
+        }
+      ],
+      "smc": [
+        {
+          "method": "GET",
+          "path": "/smc/order-blocks/{symbol}",
+          "desc": "Active order blocks for symbol"
+        },
+        {
+          "method": "GET",
+          "path": "/smc/fvgs/{symbol}",
+          "desc": "Active FVGs for symbol"
+        },
+        {
+          "method": "GET",
+          "path": "/smc/liquidity/{symbol}",
+          "desc": "BSL/SSL zones for symbol"
+        },
+        {
+          "method": "GET",
+          "path": "/smc/premium-discount/{symbol}",
+          "desc": "Current premium/discount zone"
+        },
+        {
+          "method": "GET",
+          "path": "/smc/snapshot/{symbol}",
+          "desc": "Full SMC snapshot across all timeframes"
+        }
+      ],
+      "positions": [
+        {
+          "method": "GET",
+          "path": "/positions",
+          "desc": "All open positions with full context"
+        },
+        {
+          "method": "GET",
+          "path": "/positions/{id}",
+          "desc": "Position detail with decision narrative"
+        },
+        {
+          "method": "DELETE",
+          "path": "/positions/{id}",
+          "desc": "Force close position (requires reason)",
+          "auth": true
+        }
+      ],
+      "trades": [
+        {
+          "method": "GET",
+          "path": "/trades/history",
+          "desc": "Trade history with pagination"
+        },
+        {
+          "method": "GET",
+          "path": "/trades/{id}",
+          "desc": "Trade detail with full narrative"
+        },
+        {
+          "method": "GET",
+          "path": "/trades/decisions",
+          "desc": "All decision log entries"
+        },
+        {
+          "method": "GET",
+          "path": "/trades/vetoed",
+          "desc": "Vetoed proposals and reasons"
+        }
+      ],
+      "performance": [
+        {
+          "method": "GET",
+          "path": "/performance/summary",
+          "desc": "Key metrics: PnL, WR, DD, Sharpe"
+        },
+        {
+          "method": "GET",
+          "path": "/performance/by-symbol",
+          "desc": "Per-symbol breakdown"
+        },
+        {
+          "method": "GET",
+          "path": "/performance/by-strategy",
+          "desc": "Per-strategy breakdown"
+        },
+        {
+          "method": "GET",
+          "path": "/performance/by-session",
+          "desc": "Per-session breakdown"
+        },
+        {
+          "method": "GET",
+          "path": "/performance/by-regime",
+          "desc": "Per-regime breakdown"
+        },
+        {
+          "method": "GET",
+          "path": "/performance/monthly",
+          "desc": "Monthly returns calendar"
+        },
+        {
+          "method": "GET",
+          "path": "/performance/drawdown",
+          "desc": "Drawdown chart data"
+        }
+      ],
+      "risk": [
+        {
+          "method": "GET",
+          "path": "/risk/guardian",
+          "desc": "Risk guardian current limits and usage"
+        },
+        {
+          "method": "GET",
+          "path": "/risk/capital",
+          "desc": "Capital governor allocation status"
+        },
+        {
+          "method": "GET",
+          "path": "/risk/incident-timeline",
+          "desc": "All incident state changes"
+        },
+        {
+          "method": "GET",
+          "path": "/risk/exchange-health",
+          "desc": "Exchange health monitor status"
+        }
+      ],
+      "ai": [
+        {
+          "method": "GET",
+          "path": "/ai/narrative/{symbol}",
+          "desc": "Latest AI market narrative for symbol"
+        },
+        {
+          "method": "GET",
+          "path": "/ai/sentiment",
+          "desc": "Overall AI sentiment score"
+        }
+      ],
+      "config": [
+        {
+          "method": "GET",
+          "path": "/config/current",
+          "desc": "Active configuration (sanitized, no secrets)"
+        },
+        {
+          "method": "GET",
+          "path": "/config/checksum",
+          "desc": "Config integrity checksum"
+        }
+      ]
+    },
+    "websocket_events": {
+      "channel": "ws://localhost:8001/ws",
+      "events": {
+        "SYSTEM_STATUS": {
+          "interval_ms": 2000,
+          "payload": "system_status, environment, health, mode"
+        },
+        "PRICE_TICK": {
+          "interval_ms": 1000,
+          "payload": "symbol, price, change_pct, volume"
+        },
+        "REGIME_UPDATE": {
+          "interval_ms": 60000,
+          "payload": "symbol, old_regime, new_regime, confidence"
+        },
+        "BIAS_UPDATE": {
+          "interval_ms": 30000,
+          "payload": "symbol, direction, confidence, score"
+        },
+        "POSITION_UPDATE": {
+          "interval_ms": 2000,
+          "payload": "position_id, pnl, pnl_pct, tp_progress, sl_distance"
+        },
+        "TRADE_OPENED": {
+          "trigger": "on_event",
+          "payload": "full_trade_details + decision_narrative"
+        },
+        "TRADE_CLOSED": {
+          "trigger": "on_event",
+          "payload": "full_close_details + outcome + reason"
+        },
+        "TP_HIT": {
+          "trigger": "on_event",
+          "payload": "trade_id, tp_level, remaining_size, new_sl"
+        },
+        "SL_HIT": {
+          "trigger": "on_event",
+          "payload": "trade_id, final_pnl, reason"
+        },
+        "GATE_VETO": {
+          "trigger": "on_event",
+          "payload": "gate_id, symbol, reason, proposal_summary"
+        },
+        "INCIDENT_STATE_CHANGE": {
+          "trigger": "on_event",
+          "payload": "old_state, new_state, reason, timestamp"
+        },
+        "KILL_SWITCH": {
+          "trigger": "on_event",
+          "payload": "activated_by, reason, open_positions"
+        },
+        "DAILY_SUMMARY": {
+          "trigger": "00:00_UTC",
+          "payload": "daily_pnl, trades, win_rate, drawdown"
+        },
+        "OB_DETECTED": {
+          "trigger": "on_event",
+          "payload": "symbol, tf, ob_zone, ob_score"
+        },
+        "FVG_DETECTED": {
+          "trigger": "on_event",
+          "payload": "symbol, tf, fvg_zone, fvg_type"
+        },
+        "LIQUIDITY_SWEPT": {
+          "trigger": "on_event",
+          "payload": "symbol, tf, sweep_type, price, volume"
+        },
+        "AI_NARRATIVE_UPDATE": {
+          "interval_ms": 1800000,
+          "payload": "symbol, narrative, confidence, targets"
+        },
+        "PERFORMANCE_UPDATE": {
+          "interval_ms": 30000,
+          "payload": "pnl_usdt, pnl_pct, win_rate, drawdown"
+        }
+      }
+    }
+  },
+  "ui": {
+    "framework": "nextjs",
+    "version": "14",
+    "language": "typescript",
+    "styling": "tailwindcss + shadcn/ui",
+    "charting": "tradingview_lightweight_charts",
+    "state_management": "zustand",
+    "realtime": "native_websocket",
+    "port": 3000,
+    "theme": {
+      "base": "dark",
+      "colors": {
+        "background_primary": "#0A0E1A",
+        "background_secondary": "#111827",
+        "background_card": "#1F2937",
+        "background_elevated": "#374151",
+        "border": "#374151",
+        "text_primary": "#F9FAFB",
+        "text_secondary": "#9CA3AF",
+        "text_muted": "#6B7280",
+        "accent_blue": "#3B82F6",
+        "accent_green": "#10B981",
+        "accent_red": "#EF4444",
+        "accent_yellow": "#F59E0B",
+        "accent_purple": "#8B5CF6",
+        "accent_cyan": "#06B6D4",
+        "bullish": "#10B981",
+        "bearish": "#EF4444",
+        "neutral": "#6B7280",
+        "premium_zone": "rgba(239,68,68,0.15)",
+        "discount_zone": "rgba(16,185,129,0.15)",
+        "ob_bullish": "rgba(16,185,129,0.25)",
+        "ob_bearish": "rgba(239,68,68,0.25)",
+        "fvg_bullish": "rgba(59,130,246,0.20)",
+        "fvg_bearish": "rgba(139,92,246,0.20)",
+        "liquidity_line": "#F59E0B"
+      },
+      "fonts": {
+        "mono": "JetBrains Mono",
+        "sans": "Inter"
+      },
+      "animations": {
+        "enabled": true,
+        "duration_ms": 200
+      }
+    },
+    "layout": {
+      "sidebar_width": 220,
+      "header_height": 64,
+      "environment_banner_height": 40,
+      "default_route": "/dashboard"
+    },
+    "environment_banner": {
+      "always_visible": true,
+      "position": "top",
+      "height": 40,
+      "live": {
+        "bg": "#EF4444",
+        "text": "#FFFFFF",
+        "label": "\u00e2\u0161\u00a0\u00ef\u00b8\u008f LIVE TRADING \u00e2\u20ac\u201d REAL FUNDS AT RISK",
+        "pulse": true
+      },
+      "testnet": {
+        "bg": "#F59E0B",
+        "text": "#000000",
+        "label": "TESTNET MODE \u00e2\u20ac\u201d Simulated Funds",
+        "pulse": false
+      },
+      "paper": {
+        "bg": "#3B82F6",
+        "text": "#FFFFFF",
+        "label": "PAPER TRADING \u00e2\u20ac\u201d No Real Money",
+        "pulse": false
+      }
+    },
+    "pages": {
+      "dashboard": {
+        "route": "/dashboard",
+        "title": "Overview",
+        "icon": "LayoutDashboard",
+        "layout": "grid_12col",
+        "components": [
+          {
+            "id": "portfolio_hero",
+            "grid": "col-span-12",
+            "type": "hero_metrics",
+            "metrics": [
+              {
+                "label": "Portfolio Value",
+                "value": "total_usdt",
+                "format": "$0,0.00",
+                "trend": true,
+                "change_field": "pnl_24h_pct"
+              },
+              {
+                "label": "Today P&L",
+                "value": "pnl_today_usdt",
+                "format": "+$0,0.00",
+                "color_coded": true
+              },
+              {
+                "label": "Win Rate",
+                "value": "win_rate_rolling_20",
+                "format": "0.0%",
+                "suffix": "(L20)"
+              },
+              {
+                "label": "Max Drawdown",
+                "value": "max_drawdown_pct",
+                "format": "0.00%",
+                "color": "accent_red"
+              },
+              {
+                "label": "Active Positions",
+                "value": "open_positions_count",
+                "format": "0",
+                "max": 3
+              },
+              {
+                "label": "Deployed Capital",
+                "value": "deployed_pct",
+                "format": "0.0%",
+                "max_pct": 60
+              }
+            ]
+          },
+          {
+            "id": "system_status_bar",
+            "grid": "col-span-12",
+            "type": "status_bar",
+            "items": [
+              {
+                "label": "Mode",
+                "value": "system.mode",
+                "badge": true
+              },
+              {
+                "label": "Regime",
+                "value": "market.regime",
+                "badge": true,
+                "color_by_value": true
+              },
+              {
+                "label": "Session",
+                "value": "market.session",
+                "badge": true
+              },
+              {
+                "label": "Incident",
+                "value": "incident.state",
+                "badge": true,
+                "alert_if": "!= NORMAL"
+              },
+              {
+                "label": "Exchange",
+                "value": "exchange.health_stage",
+                "badge": true,
+                "alert_if": "!= NORMAL"
+              },
+              {
+                "label": "Bot",
+                "value": "system.running_status",
+                "badge": true
+              }
+            ]
+          },
+          {
+            "id": "symbol_cards",
+            "grid": "col-span-12",
+            "type": "symbol_watchlist",
+            "symbols": [
+              "BTCUSDT",
+              "ETHUSDT",
+              "SOLUSDT",
+              "BNBUSDT",
+              "XRPUSDT"
+            ],
+            "per_card": [
+              "price",
+              "change_24h_pct",
+              "regime",
+              "bias_direction",
+              "bias_confidence",
+              "active_ob_count",
+              "active_fvg_count",
+              "session_quality",
+              "spread"
+            ],
+            "click_to_detail": true
+          },
+          {
+            "id": "open_positions",
+            "grid": "col-span-8",
+            "type": "positions_table",
+            "columns": [
+              "symbol",
+              "strategy",
+              "direction",
+              "entry_price",
+              "current_price",
+              "pnl_usdt",
+              "pnl_pct",
+              "tp1_distance",
+              "sl_distance",
+              "hold_time",
+              "rr_current",
+              "data_tag"
+            ],
+            "row_color_by_pnl": true,
+            "click_to_expand": true,
+            "expand_shows": [
+              "entry_reason",
+              "decision_narrative",
+              "structure_zone",
+              "confluence_score",
+              "all_tp_levels",
+              "ai_narrative"
+            ]
+          },
+          {
+            "id": "why_no_trade",
+            "grid": "col-span-4",
+            "type": "why_no_trade_panel",
+            "show_last_n_vetoes": 5,
+            "per_veto": [
+              "timestamp",
+              "symbol",
+              "gate_id",
+              "gate_name",
+              "reason",
+              "confluence_score"
+            ],
+            "empty_state": "System is active \u00e2\u20ac\u201d waiting for valid setup",
+            "refresh_on_ws": "GATE_VETO"
+          },
+          {
+            "id": "pipeline_status",
+            "grid": "col-span-6",
+            "type": "decision_pipeline_visual",
+            "gates": [
+              "G1_Regime",
+              "G2_Bias",
+              "G3_Session",
+              "G4_Confluence",
+              "G5_Structure",
+              "G6_Liquidity",
+              "G7_Displacement",
+              "G8_Risk/RR",
+              "G9_Exchange"
+            ],
+            "show_last_evaluation": true,
+            "show_pass_fail_per_gate": true,
+            "color": {
+              "pass": "accent_green",
+              "fail": "accent_red",
+              "skip": "neutral",
+              "pending": "accent_yellow"
+            }
+          },
+          {
+            "id": "ai_narrative",
+            "grid": "col-span-6",
+            "type": "ai_narrative_panel",
+            "per_symbol": true,
+            "shows": [
+              "narrative_text",
+              "direction_confidence_gauge",
+              "next_targets",
+              "key_levels_watch",
+              "sentiment_score",
+              "last_updated"
+            ],
+            "refresh_on_ws": "AI_NARRATIVE_UPDATE"
+          }
+        ]
+      },
+      "charts": {
+        "route": "/charts/:symbol",
+        "title": "Charts & Structure",
+        "icon": "LineChart",
+        "components": [
+          {
+            "id": "main_chart",
+            "type": "tradingview_chart",
+            "default_tf": "1h",
+            "available_tfs": [
+              "1m",
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d",
+              "1w"
+            ],
+            "overlays": {
+              "order_blocks": {
+                "enabled": true,
+                "bullish_color": "rgba(16,185,129,0.25)",
+                "bearish_color": "rgba(239,68,68,0.25)",
+                "show_label": true,
+                "show_score": true,
+                "show_mitigation_level": true
+              },
+              "fair_value_gaps": {
+                "enabled": true,
+                "bullish_color": "rgba(59,130,246,0.20)",
+                "bearish_color": "rgba(139,92,246,0.20)",
+                "show_midpoint": true
+              },
+              "liquidity_zones": {
+                "bsl_color": "#10B981",
+                "ssl_color": "#EF4444",
+                "line_style": "dashed",
+                "show_label": true
+              },
+              "premium_discount_zones": {
+                "premium_bg": "rgba(239,68,68,0.08)",
+                "discount_bg": "rgba(16,185,129,0.08)",
+                "oez_bg": "rgba(245,158,11,0.12)",
+                "show_labels": true
+              },
+              "swing_pivots": {
+                "enabled": true,
+                "dot_size": 4,
+                "hh_color": "#10B981",
+                "hl_color": "#6EE7B7",
+                "lh_color": "#FCA5A5",
+                "ll_color": "#EF4444"
+              },
+              "bos_choch_labels": {
+                "enabled": true,
+                "bos_color": "#3B82F6",
+                "choch_color": "#F59E0B",
+                "font_size": 11
+              },
+              "ema_lines": {
+                "enabled": true,
+                "emas": [
+                  20,
+                  50,
+                  200
+                ]
+              },
+              "trade_entries_exits": {
+                "enabled": true,
+                "entry_icon": "\u00e2\u2013\u00b2/\u00e2\u2013\u00bc",
+                "tp_line": "green_dashed",
+                "sl_line": "red_dashed"
+              }
+            }
+          },
+          {
+            "id": "mtf_bias_panel",
+            "type": "multi_timeframe_bias_grid",
+            "timeframes": [
+              "1w",
+              "1d",
+              "4h",
+              "1h",
+              "15m",
+              "5m"
+            ],
+            "per_cell": [
+              "trend_state",
+              "bias_direction",
+              "structure_last_event",
+              "ob_count",
+              "fvg_count"
+            ],
+            "color_by_bias": true
+          },
+          {
+            "id": "smc_zones_list",
+            "type": "smc_zones_panel",
+            "tabs": [
+              "Order Blocks",
+              "Fair Value Gaps",
+              "Liquidity Zones"
+            ],
+            "per_zone": [
+              "type",
+              "tf",
+              "price_range",
+              "score",
+              "age_candles",
+              "status",
+              "distance_pct"
+            ]
+          }
+        ]
+      },
+      "positions": {
+        "route": "/positions",
+        "title": "Positions",
+        "icon": "TrendingUp",
+        "components": [
+          {
+            "id": "positions_detail_table",
+            "type": "positions_full_table",
+            "columns": [
+              "symbol",
+              "strategy",
+              "direction",
+              "size_usdt",
+              "entry_price",
+              "current_price",
+              "tp1",
+              "tp2",
+              "tp3",
+              "sl",
+              "pnl_usdt",
+              "pnl_pct",
+              "rr_current",
+              "status",
+              "hold_time",
+              "confluence_score"
+            ],
+            "expandable_row": {
+              "tabs": [
+                "Decision Narrative",
+                "Entry Context",
+                "SMC Zones",
+                "AI Opinion",
+                "Trade Log"
+              ],
+              "decision_narrative": [
+                "why_allowed",
+                "context_at_entry",
+                "bias_at_entry",
+                "all_gate_results",
+                "scoring_breakdown"
+              ],
+              "entry_context": [
+                "regime",
+                "session",
+                "market_structure",
+                "htf_ob",
+                "ltf_ob",
+                "fvg",
+                "liquidity_swept",
+                "displacement"
+              ],
+              "smc_zones": [
+                "ob_chart",
+                "fvg_chart",
+                "pd_zone",
+                "fibonacci_levels"
+              ],
+              "ai_opinion": [
+                "narrative_at_entry",
+                "direction_confidence",
+                "targets",
+                "sentiment_score"
+              ],
+              "trade_log": [
+                "all_events_chronological"
+              ]
+            }
+          },
+          {
+            "id": "position_risk_gauge",
+            "type": "risk_gauges",
+            "gauges": [
+              {
+                "label": "Portfolio Exposure",
+                "used_pct": "deployed_pct",
+                "max_pct": 60
+              },
+              {
+                "label": "Daily P&L",
+                "used_pct": "daily_pnl_vs_limit_pct",
+                "alert_above": 80
+              },
+              {
+                "label": "Drawdown",
+                "used_pct": "current_dd_pct",
+                "alert_above": 75,
+                "max_pct": 20
+              }
+            ]
+          }
+        ]
+      },
+      "trade_history": {
+        "route": "/trades",
+        "title": "Trade History",
+        "icon": "History",
+        "components": [
+          {
+            "id": "trade_history_table",
+            "type": "trades_table",
+            "filters": [
+              "date_range",
+              "symbol",
+              "strategy",
+              "direction",
+              "outcome",
+              "session",
+              "regime"
+            ],
+            "columns": [
+              "date",
+              "symbol",
+              "strategy",
+              "direction",
+              "entry",
+              "exit",
+              "pnl_usdt",
+              "pnl_pct",
+              "rr_achieved",
+              "rr_planned",
+              "hold_time",
+              "exit_reason",
+              "session",
+              "regime"
+            ],
+            "sortable": true,
+            "exportable": [
+              "csv",
+              "json"
+            ]
+          },
+          {
+            "id": "pnl_chart",
+            "type": "equity_curve_chart",
+            "series": [
+              "cumulative_pnl",
+              "daily_pnl_bars"
+            ],
+            "show_drawdown_overlay": true
+          },
+          {
+            "id": "trade_distribution",
+            "type": "distribution_charts",
+            "charts": [
+              "pnl_histogram",
+              "rr_distribution",
+              "hold_time_distribution",
+              "win_rate_by_session",
+              "win_rate_by_symbol"
+            ]
+          }
+        ]
+      },
+      "performance": {
+        "route": "/performance",
+        "title": "Performance",
+        "icon": "BarChart2",
+        "components": [
+          {
+            "id": "kpi_grid",
+            "type": "kpi_cards",
+            "cards": [
+              {
+                "label": "Total P&L",
+                "value": "total_pnl_usdt",
+                "format": "$0,0.00",
+                "sub": "total_pnl_pct"
+              },
+              {
+                "label": "Win Rate",
+                "value": "win_rate",
+                "format": "0.0%",
+                "sub": "(all time)"
+              },
+              {
+                "label": "Profit Factor",
+                "value": "profit_factor",
+                "format": "0.00",
+                "green_above": 1.5
+              },
+              {
+                "label": "Sharpe Ratio",
+                "value": "sharpe_ratio",
+                "format": "0.00",
+                "green_above": 1.5
+              },
+              {
+                "label": "Max Drawdown",
+                "value": "max_drawdown_pct",
+                "format": "0.00%",
+                "red_above": 15
+              },
+              {
+                "label": "Avg R:R",
+                "value": "avg_rr_achieved",
+                "format": "0.00x",
+                "green_above": 2.0
+              },
+              {
+                "label": "Expectancy",
+                "value": "expectancy_per_trade",
+                "format": "$0.00",
+                "sub": "per trade"
+              },
+              {
+                "label": "Total Trades",
+                "value": "total_trades",
+                "format": "0"
+              }
+            ]
+          },
+          {
+            "id": "monthly_returns",
+            "type": "monthly_returns_heatmap",
+            "format": "pct",
+            "color_scale": {
+              "min": "-5%",
+              "zero": "neutral",
+              "max": "5%"
+            }
+          },
+          {
+            "id": "performance_breakdown",
+            "type": "breakdown_tables",
+            "tabs": [
+              "By Symbol",
+              "By Strategy",
+              "By Session",
+              "By Regime",
+              "By Day of Week"
+            ],
+            "columns": [
+              "entity",
+              "trades",
+              "win_rate",
+              "pnl_usdt",
+              "pnl_pct",
+              "avg_rr",
+              "profit_factor"
+            ]
+          },
+          {
+            "id": "drawdown_chart",
+            "type": "drawdown_chart",
+            "show_underwater_equity": true,
+            "max_dd_line": true,
+            "recovery_periods": true
+          }
+        ]
+      },
+      "risk": {
+        "route": "/risk",
+        "title": "Risk",
+        "icon": "Shield",
+        "components": [
+          {
+            "id": "risk_dashboard",
+            "type": "risk_overview",
+            "sections": {
+              "capital_governor": {
+                "shows": [
+                  "total_capital",
+                  "deployed_usdt",
+                  "deployed_pct",
+                  "per_symbol_allocation",
+                  "remaining_capacity",
+                  "regime_multiplier",
+                  "bias_multiplier",
+                  "effective_risk_pct"
+                ]
+              },
+              "daily_limits": {
+                "shows": [
+                  "daily_pnl",
+                  "daily_limit",
+                  "pct_used",
+                  "trades_today",
+                  "trades_limit",
+                  "consecutive_losses",
+                  "circuit_breaker_status"
+                ]
+              },
+              "portfolio_limits": {
+                "shows": [
+                  "max_exposure_limit",
+                  "current_exposure",
+                  "weekly_dd",
+                  "weekly_limit",
+                  "monthly_dd",
+                  "monthly_limit"
+                ]
+              },
+              "kill_switch": {
+                "shows": [
+                  "status",
+                  "last_activated",
+                  "activated_by",
+                  "reason"
+                ],
+                "activate_button": true,
+                "button_requires_confirm": true
+              }
+            }
+          },
+          {
+            "id": "incident_timeline",
+            "type": "timeline_component",
+            "shows": [
+              "timestamp",
+              "old_state",
+              "new_state",
+              "reason",
+              "trading_impact"
+            ],
+            "color_by_severity": true
+          },
+          {
+            "id": "exchange_health",
+            "type": "exchange_health_panel",
+            "shows": [
+              "current_stage",
+              "latency_ms",
+              "error_count_5min",
+              "last_error",
+              "consecutive_errors",
+              "time_in_current_stage",
+              "escalation_thresholds"
+            ]
+          },
+          {
+            "id": "risk_guardian_limits",
+            "type": "limits_table",
+            "categories": [
+              "order",
+              "strategy",
+              "portfolio"
+            ],
+            "columns": [
+              "limit_name",
+              "limit_value",
+              "current_value",
+              "pct_used",
+              "status"
+            ]
+          }
+        ]
+      },
+      "decisions": {
+        "route": "/decisions",
+        "title": "Decision Log",
+        "icon": "ClipboardList",
+        "components": [
+          {
+            "id": "decision_log_table",
+            "type": "decisions_table",
+            "filters": [
+              "date_range",
+              "symbol",
+              "outcome",
+              "gate_failed",
+              "strategy"
+            ],
+            "columns": [
+              "timestamp",
+              "symbol",
+              "direction",
+              "outcome",
+              "gate_passed",
+              "gate_failed",
+              "confluence_score",
+              "scoring_breakdown",
+              "context_snapshot"
+            ],
+            "expandable": true,
+            "expand_shows": [
+              "full_narrative",
+              "all_gate_results",
+              "indicator_snapshot",
+              "ai_opinion",
+              "proposal_details"
+            ]
+          },
+          {
+            "id": "veto_analysis",
+            "type": "veto_breakdown_chart",
+            "shows": [
+              "veto_count_by_gate",
+              "veto_rate_over_time",
+              "most_common_veto_reasons"
+            ]
+          }
+        ]
+      },
+      "market_intelligence": {
+        "route": "/intelligence",
+        "title": "Market Intel",
+        "icon": "Brain",
+        "components": [
+          {
+            "id": "smc_multi_symbol",
+            "type": "smc_overview_grid",
+            "per_symbol": {
+              "bias_arrow": true,
+              "regime_badge": true,
+              "structure_state": true,
+              "active_obs": true,
+              "active_fvgs": true,
+              "nearest_liquidity": true,
+              "premium_discount_zone": true,
+              "ai_confidence": true
+            }
+          },
+          {
+            "id": "ai_narratives",
+            "type": "ai_narratives_panel",
+            "per_symbol_card": {
+              "shows": [
+                "narrative_text",
+                "direction_confidence_bar",
+                "next_targets",
+                "key_levels",
+                "sentiment_meter",
+                "last_updated"
+              ],
+              "refresh_interval_ms": 1800000
+            }
+          },
+          {
+            "id": "market_heatmap",
+            "type": "mtf_confluence_heatmap",
+            "rows": "symbols",
+            "columns": "timeframes",
+            "cell_value": "bias_score",
+            "color_scale": "green_red",
+            "click_to_chart": true
+          }
+        ]
+      },
+      "backtesting": {
+        "route": "/backtest",
+        "title": "Backtest",
+        "icon": "FlaskConical",
+        "components": [
+          {
+            "id": "backtest_runner",
+            "type": "backtest_form",
+            "fields": [
+              "symbols_multiselect",
+              "strategy_select",
+              "date_range",
+              "initial_capital",
+              "commission_pct",
+              "slippage_pct",
+              "enable_walk_forward",
+              "enable_monte_carlo"
+            ],
+            "run_button": true,
+            "progress_bar": true
+          },
+          {
+            "id": "backtest_results",
+            "type": "backtest_results_panel",
+            "tabs": [
+              "Summary",
+              "Equity Curve",
+              "Trade List",
+              "Walk-Forward",
+              "Monte Carlo",
+              "By Symbol"
+            ],
+            "shows_kpis": [
+              "sharpe",
+              "sortino",
+              "max_dd",
+              "win_rate",
+              "pf",
+              "total_trades",
+              "avg_rr",
+              "expectancy",
+              "calmar"
+            ],
+            "status_badges": {
+              "pass_color": "accent_green",
+              "fail_color": "accent_red"
+            }
+          }
+        ]
+      },
+      "settings": {
+        "route": "/settings",
+        "title": "Settings",
+        "icon": "Settings",
+        "components": [
+          {
+            "id": "system_settings",
+            "type": "settings_form",
+            "sections": {
+              "Trading Mode": [
+                "mode",
+                "environment",
+                "initial_capital"
+              ],
+              "Risk Limits": [
+                "max_daily_dd_pct",
+                "base_risk_pct",
+                "max_concurrent_positions",
+                "circuit_breaker_losses"
+              ],
+              "Symbols": [
+                "enabled_symbols_toggle"
+              ],
+              "Strategies": [
+                "enabled_strategies_toggle",
+                "min_confluence_score",
+                "min_rr"
+              ],
+              "Notifications": [
+                "telegram_enabled",
+                "discord_enabled",
+                "events_to_notify"
+              ],
+              "AI Intelligence": [
+                "ai_enabled",
+                "ai_model",
+                "narrative_interval_minutes"
+              ],
+              "Display": [
+                "theme",
+                "animation_enabled",
+                "chart_default_tf"
+              ]
+            },
+            "save_validates_checksum": true,
+            "changes_require_restart_warning": true
+          }
+        ]
+      }
+    },
+    "global_components": {
+      "toast_notifications": {
+        "position": "bottom_right",
+        "types": {
+          "trade_open": "accent_blue",
+          "trade_close": "accent_green",
+          "sl_hit": "accent_red",
+          "gate_veto": "accent_yellow",
+          "kill_switch": "accent_red",
+          "incident": "accent_red"
+        },
+        "auto_dismiss_ms": 6000
+      },
+      "connection_status_indicator": {
+        "position": "bottom_left",
+        "shows": [
+          "ws_connected",
+          "api_connected",
+          "exchange_connected",
+          "last_data_ts"
+        ],
+        "red_if_disconnected": true
+      },
+      "incident_alert_modal": {
+        "auto_show_on_incident_state_change": true,
+        "blocks_ui_on_halted": false,
+        "requires_acknowledge_button": true
+      }
+    }
+  },
+  "testing": {
+    "framework": "pytest",
+    "config_file": "pytest.ini",
+    "coverage_target_pct": 80,
+    "test_suites": {
+      "unit_tests": {
+        "path": "tests/unit/",
+        "files": {
+          "test_market_structure.py": [
+            "test_bullish_bos_detected",
+            "test_bearish_bos_detected",
+            "test_choch_detected_after_trend",
+            "test_swing_pivot_lookback",
+            "test_trend_state_hh_hl",
+            "test_trend_state_lh_ll",
+            "test_swing_invalidation_on_break",
+            "test_min_swing_size_filter"
+          ],
+          "test_smc_engine.py": [
+            "test_bullish_ob_detection",
+            "test_bearish_ob_detection",
+            "test_ob_mitigation_50pct",
+            "test_ob_invalidated_on_close_through",
+            "test_ob_age_expiry",
+            "test_breaker_block_polarity_flip",
+            "test_fvg_bull_detection",
+            "test_fvg_bear_detection",
+            "test_fvg_fill_invalidates",
+            "test_bsl_equal_highs",
+            "test_ssl_equal_lows",
+            "test_sweep_detection_wick_close",
+            "test_premium_zone_above_618",
+            "test_discount_zone_below_382",
+            "test_displacement_candle_detection",
+            "test_inducement_no_entry"
+          ],
+          "test_bias_engine.py": [
+            "test_bullish_bias_htf_aligned",
+            "test_bearish_bias_htf_aligned",
+            "test_neutral_bias_on_conflict",
+            "test_bias_flip_cooldown",
+            "test_confidence_high_above_075",
+            "test_confidence_low_blocks_trade",
+            "test_anti_bias_trade_blocked"
+          ],
+          "test_scoring_contract.py": [
+            "test_all_4_components_required",
+            "test_unnormalized_rejected",
+            "test_composite_below_065_rejected",
+            "test_valid_proposal_passes",
+            "test_proposal_expiry_after_30s",
+            "test_ml_max_influence_30pct"
+          ],
+          "test_trade_permission_filter.py": [
+            "test_no_trade_regime_blocks_all",
+            "test_anti_bias_direction_blocked",
+            "test_low_confluence_blocked",
+            "test_no_structural_zone_blocked",
+            "test_rr_below_2_blocked",
+            "test_all_gates_pass_allows_trade",
+            "test_veto_narrative_always_logged",
+            "test_soft_gate_penalty_applied"
+          ],
+          "test_capital_governor.py": [
+            "test_trending_full_capital",
+            "test_ranging_75pct_capital",
+            "test_high_vol_30pct_capital",
+            "test_no_trade_zero_capital",
+            "test_drawdown_5pct_reduces_to_80pct",
+            "test_drawdown_20pct_halts",
+            "test_consecutive_loss_size_reduction",
+            "test_daily_trade_limit"
+          ],
+          "test_risk_guardian.py": [
+            "test_kill_switch_halts_all",
+            "test_kill_switch_persists_restart",
+            "test_max_daily_dd_triggers_halt",
+            "test_circuit_breaker_5_losses",
+            "test_order_size_above_max_rejected",
+            "test_rr_below_min_rejected",
+            "test_funding_rate_blocks_entry"
+          ],
+          "test_trade_management.py": [
+            "test_be_trigger_on_tp1",
+            "test_trail_activates_after_tp1",
+            "test_structure_trail_below_swing_low",
+            "test_partial_40pct_on_tp1",
+            "test_partial_35pct_on_tp2",
+            "test_full_close_tp3",
+            "test_adverse_structure_invalidation_close_immediately"
+          ]
+        }
+      },
+      "integration_tests": {
+        "path": "tests/integration/",
+        "files": {
+          "test_decision_pipeline.py": [
+            "test_full_pipeline_valid_long_proposal_executes",
+            "test_full_pipeline_no_trade_regime_blocks_all_stages",
+            "test_full_pipeline_bias_conflict_stops_at_stage3",
+            "test_full_pipeline_low_confluence_stops_at_stage5",
+            "test_full_pipeline_decision_logged_at_every_stage",
+            "test_pipeline_replay_engine_deterministic"
+          ],
+          "test_smc_strategy_integration.py": [
+            "test_smc_trend_proposal_generated_in_trending_market",
+            "test_smc_scalper_proposal_in_correct_session",
+            "test_range_scalp_proposal_in_ranging_market",
+            "test_no_proposal_in_high_volatility",
+            "test_proposal_includes_all_4_scoring_components",
+            "test_entry_only_at_ob_zone",
+            "test_sl_beyond_structure_always"
+          ],
+          "test_execution_router.py": [
+            "test_paper_order_executes_with_slippage",
+            "test_paper_order_applies_maker_fee",
+            "test_limit_order_cancel_on_timeout",
+            "test_partial_close_tp1_moves_sl_to_be",
+            "test_position_closes_on_sl_hit",
+            "test_live_mode_requires_prod_flag"
+          ],
+          "test_cold_start.py": [
+            "test_cold_start_validates_exchange_connectivity",
+            "test_cold_start_fails_on_bad_api_key",
+            "test_cold_start_reconciles_open_positions",
+            "test_cold_start_loads_risk_state_from_db",
+            "test_cold_start_warmup_5min_before_first_trade",
+            "test_cold_start_ui_progress_updates"
+          ],
+          "test_incident_handling.py": [
+            "test_3_errors_triggers_degraded_state",
+            "test_5_errors_triggers_incident_freeze",
+            "test_kill_switch_triggers_halted",
+            "test_halted_state_requires_operator_ack",
+            "test_incident_freeze_close_only_mode",
+            "test_all_incident_transitions_logged"
+          ]
+        }
+      },
+      "failure_path_tests": {
+        "path": "tests/failure/",
+        "priority": "HIGHEST",
+        "files": {
+          "test_failure_scenarios.py": [
+            "test_timestamp_out_of_sync_detected",
+            "test_partial_balance_response_handled",
+            "test_api_key_revoked_mid_session_triggers_freeze",
+            "test_restart_with_open_positions_reconciles",
+            "test_exchange_health_flapping_degrades_gracefully",
+            "test_config_checksum_mismatch_halts_startup",
+            "test_websocket_disconnect_reconnects_auto",
+            "test_stale_data_blocks_new_entries",
+            "test_mixed_environment_rendering_blocked",
+            "test_kill_switch_survives_process_restart",
+            "test_risk_state_survives_crash",
+            "test_json_decode_error_from_exchange_handled",
+            "test_rate_limit_hit_backs_off_gracefully",
+            "test_open_position_on_startup_no_duplicate_order"
+          ]
+        }
+      },
+      "smoke_tests": {
+        "path": "tests/smoke/",
+        "run_on": "every_startup",
+        "files": {
+          "test_smoke.py": [
+            "test_exchange_connectivity",
+            "test_api_key_valid",
+            "test_data_feed_returns_ohlcv",
+            "test_all_5_symbols_accessible",
+            "test_decision_pipeline_importable",
+            "test_risk_guardian_loads",
+            "test_dashboard_api_health_endpoint",
+            "test_websocket_connects"
+          ]
+        }
+      }
+    },
+    "test_commands": {
+      "all": "pytest tests/ -v --cov=src --cov-report=html",
+      "unit": "pytest tests/unit/ -v",
+      "integration": "pytest tests/integration/ -v",
+      "failure": "pytest tests/failure/ -v",
+      "smoke": "pytest tests/smoke/ -v",
+      "fast": "pytest tests/ -v -x --ignore=tests/integration",
+      "coverage": "pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=80"
+    }
+  },
+  "notifications": {
+    "telegram": {
+      "enabled": true,
+      "bot_token_env": "TELEGRAM_BOT_TOKEN",
+      "chat_id_env": "TELEGRAM_USER_ID",
+      "events": [
+        "TRADE_OPENED",
+        "TRADE_CLOSED",
+        "TP1_HIT",
+        "TP2_HIT",
+        "TP3_HIT",
+        "SL_HIT",
+        "DAILY_LOSS_THRESHOLD",
+        "KILL_SWITCH",
+        "INCIDENT_STATE_CHANGE",
+        "CIRCUIT_BREAKER",
+        "REGIME_CHANGE",
+        "AI_RISK_EVENT"
+      ],
+      "include_decision_narrative": true,
+      "rate_limit_per_minute": 5,
+      "message_format": {
+        "trade_open": "\u00f0\u0178\u0178\u00a2 {direction} {symbol} @ {price}\nStrategy: {strategy}\nSize: ${size}\nSL: {sl_pct}% | TP1: {tp1_pct}% | RR: {rr}\nConfluence: {score}%\n{narrative_summary}",
+        "trade_close": "{'\u00f0\u0178\u008f\u2020' if pnl>0 else '\u00e2\u009d\u0152'} CLOSED {symbol}\nP&L: ${pnl} ({pnl_pct}%)\nExit: {exit_reason}\nHeld: {hold_time}",
+        "daily_summary": "\u00f0\u0178\u201c\u0160 DAILY SUMMARY\nP&L: ${daily_pnl}\nTrades: {trade_count} | WR: {win_rate}%\nDD: {current_dd}%"
+      }
+    },
+    "discord": {
+      "enabled": false,
+      "webhook_env": "DISCORD_WEBHOOK_URL",
+      "events": [
+        "TRADE_OPENED",
+        "TRADE_CLOSED",
+        "DAILY_SUMMARY"
+      ]
+    },
+    "email": {
+      "enabled": false,
+      "smtp_host_env": "SMTP_HOST",
+      "events": [
+        "WEEKLY_REPORT",
+        "KILL_SWITCH"
+      ]
+    }
+  },
+  "monitoring": {
+    "prometheus": {
+      "enabled": true,
+      "port": 9090,
+      "path": "/metrics",
+      "metrics": [
+        "cryptoboss_trades_total{symbol,strategy,direction,outcome}",
+        "cryptoboss_win_rate_rolling20{symbol}",
+        "cryptoboss_pnl_daily_usdt",
+        "cryptoboss_drawdown_current_pct",
+        "cryptoboss_regime_current{symbol}",
+        "cryptoboss_bias_confidence{symbol}",
+        "cryptoboss_pipeline_veto_count{gate_id}",
+        "cryptoboss_active_positions",
+        "cryptoboss_capital_deployed_pct",
+        "cryptoboss_exchange_health_stage",
+        "cryptoboss_incident_state",
+        "cryptoboss_ai_sentiment_score{symbol}",
+        "cryptoboss_ob_active_count{symbol,tf}",
+        "cryptoboss_fvg_active_count{symbol,tf}",
+        "cryptoboss_execution_latency_ms"
+      ]
+    },
+    "health_endpoint": {
+      "enabled": true,
+      "port": 8080,
+      "path": "/health"
+    }
+  },
+  "deployment": {
+    "dockerfile": {
+      "base_image": "python:3.11-slim",
+      "workdir": "/app",
+      "copy_files": [
+        "src/",
+        "configs/",
+        "requirements.txt",
+        "run_trading_bot.py"
+      ],
+      "install_cmd": "pip install -r requirements.txt",
+      "entrypoint": "python run_trading_bot.py",
+      "expose_ports": [
+        8000,
+        8080,
+        9090
+      ]
+    },
+    "docker_compose": {
+      "services": {
+        "cryptoboss": {
+          "build": ".",
+          "ports": [
+            "8000:8000",
+            "8080:8080",
+            "9090:9090"
+          ],
+          "env_file": ".env",
+          "volumes": [
+            "./data:/app/data",
+            "./logs:/app/logs"
+          ],
+          "restart": "unless-stopped"
+        },
+        "frontend": {
+          "build": "./frontend",
+          "ports": [
+            "3000:3000"
+          ],
+          "depends_on": [
+            "cryptoboss"
+          ],
+          "restart": "unless-stopped"
+        },
+        "redis": {
+          "image": "redis:7-alpine",
+          "ports": [
+            "6379:6379"
+          ],
+          "restart": "unless-stopped"
+        }
+      }
+    },
+    "environment_variables_required": [
+      "BINANCE_API_KEY",
+      "BINANCE_API_SECRET",
+      "ENVIRONMENT",
+      "BINANCE_TESTNET_ENABLED"
+    ],
+    "environment_variables_optional": [
+      "OPENAI_API_KEY",
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_USER_ID",
+      "DISCORD_WEBHOOK_URL",
+      "REDIS_URL",
+      "DB_ENCRYPTION_KEY"
+    ]
+  },
+  "secrets_management": {
+    "provider": "environment",
+    "validate_on_startup": true,
+    "fail_if_required_missing": true,
+    "sensitive_fields_to_mask_in_logs": [
+      "api_key",
+      "api_secret",
+      "password",
+      "token",
+      "webhook_url"
+    ]
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "json",
+    "outputs": [
+      "console",
+      "file"
+    ],
+    "file_path": "logs/cryptoboss.log",
+    "rotation": "daily",
+    "retention_days": 30,
+    "separate_log_files": {
+      "decisions": "logs/decisions.jsonl",
+      "trades": "logs/trades.jsonl",
+      "errors": "logs/errors.log",
+      "audit": "logs/audit_trail.jsonl",
+      "smc": "logs/smc_events.jsonl"
+    }
+  },
+  "new_files_to_create": {
+    "_note": "Files that must be created to complete the v12.0 upgrade. All existing v10.0 files remain unchanged.",
+    "strategy_files": [
+      "src/strategies/smc_trend_follow.py   \u00e2\u20ac\u201d SMCTrendFollowStrategy(StrategyBase)",
+      "src/strategies/smc_scalper.py        \u00e2\u20ac\u201d SMCScalperStrategy(StrategyBase)",
+      "src/strategies/range_scalp.py        \u00e2\u20ac\u201d RangeScalpStrategy(StrategyBase)"
+    ],
+    "analysis_files": [
+      "src/analysis/market_structure.py     \u00e2\u20ac\u201d MarketStructureEngine (CHoCH/BOS/MSB/swings)",
+      "src/analysis/smc_engine.py           \u00e2\u20ac\u201d SMCEngine (OB/FVG/Liquidity/PD zones)",
+      "src/analysis/ai_intelligence.py      \u00e2\u20ac\u201d AIIntelligenceAdvisor (gpt-4o advisory)",
+      "src/analysis/performance_analytics.py\u00e2\u20ac\u201d PerformanceAnalyticsEngine"
+    ],
+    "core_upgrades": [
+      "src/core/trade_management_engine.py  \u00e2\u20ac\u201d TradeManagementEngine (BE/trail/partial exits)"
+    ],
+    "config_files": [
+      "configs/cryptoboss_v12_final.json    \u00e2\u20ac\u201d THIS FILE (master config)",
+      "configs/smc_config.yaml              \u00e2\u20ac\u201d SMC engine parameters",
+      "configs/strategies_config.yaml       \u00e2\u20ac\u201d All strategy parameters"
+    ],
+    "test_files": [
+      "tests/unit/test_market_structure.py",
+      "tests/unit/test_smc_engine.py",
+      "tests/unit/test_bias_engine.py",
+      "tests/unit/test_scoring_contract.py",
+      "tests/unit/test_trade_permission_filter.py",
+      "tests/unit/test_capital_governor.py",
+      "tests/unit/test_risk_guardian.py",
+      "tests/unit/test_trade_management.py",
+      "tests/integration/test_decision_pipeline.py",
+      "tests/integration/test_smc_strategy_integration.py",
+      "tests/integration/test_execution_router.py",
+      "tests/integration/test_cold_start.py",
+      "tests/integration/test_incident_handling.py",
+      "tests/failure/test_failure_scenarios.py",
+      "tests/smoke/test_smoke.py"
+    ],
+    "frontend_pages": [
+      "frontend/src/pages/dashboard.tsx",
+      "frontend/src/pages/charts/[symbol].tsx",
+      "frontend/src/pages/positions.tsx",
+      "frontend/src/pages/trades.tsx",
+      "frontend/src/pages/performance.tsx",
+      "frontend/src/pages/risk.tsx",
+      "frontend/src/pages/decisions.tsx",
+      "frontend/src/pages/intelligence.tsx",
+      "frontend/src/pages/backtest.tsx",
+      "frontend/src/pages/settings.tsx"
+    ],
+    "frontend_components": [
+      "frontend/src/components/EnvironmentBanner.tsx",
+      "frontend/src/components/charts/SMCOverlayChart.tsx",
+      "frontend/src/components/charts/MTFBiasGrid.tsx",
+      "frontend/src/components/charts/EquityCurve.tsx",
+      "frontend/src/components/panels/WhyNoTrade.tsx",
+      "frontend/src/components/panels/DecisionPipeline.tsx",
+      "frontend/src/components/panels/AINarrative.tsx",
+      "frontend/src/components/panels/SMCZonesList.tsx",
+      "frontend/src/components/panels/IncidentTimeline.tsx",
+      "frontend/src/components/panels/RiskGauges.tsx",
+      "frontend/src/components/panels/PortfolioHero.tsx",
+      "frontend/src/components/panels/SymbolCards.tsx",
+      "frontend/src/components/layout/Sidebar.tsx",
+      "frontend/src/components/layout/Header.tsx",
+      "frontend/src/hooks/useWebSocket.ts",
+      "frontend/src/store/tradingStore.ts",
+      "frontend/src/store/marketStore.ts",
+      "frontend/src/lib/api.ts"
+    ]
+  },
+  "testing_readiness_checklist": {
+    "pre_testnet_checklist": [
+      "[ ] All unit tests passing (pytest tests/unit/ -v)",
+      "[ ] All integration tests passing (pytest tests/integration/ -v)",
+      "[ ] All failure path tests passing (pytest tests/failure/ -v)",
+      "[ ] Coverage > 80% (pytest --cov=src --cov-fail-under=80)",
+      "[ ] Smoke tests pass on paper mode",
+      "[ ] Cold start completes without error on testnet",
+      "[ ] All 5 symbols OHLCV loading correctly",
+      "[ ] Bias engine warm on all symbols",
+      "[ ] Decision logger writing to JSONL",
+      "[ ] Telegram notifications delivered (send test message)",
+      "[ ] Dashboard UI loads on :3000",
+      "[ ] WebSocket connection stable",
+      "[ ] All 9 permission gates respond to forced failure",
+      "[ ] Kill switch activates and persists across restart",
+      "[ ] Config checksum validates on startup",
+      "[ ] Open position reconciliation on restart works",
+      "[ ] Paper trade opened, TP1 hit \u00e2\u2020\u2019 SL moves to BE (verified in logs)",
+      "[ ] Paper trade SL hit \u00e2\u2020\u2019 position closed, narrative logged"
+    ],
+    "testnet_validation_criteria": {
+      "min_duration_days": 30,
+      "target_sharpe": 1.5,
+      "target_win_rate_pct": 45,
+      "max_dd_pct": 20,
+      "target_pf": 1.5,
+      "min_trades_for_validity": 30,
+      "all_incident_types_triggered_at_least_once": true,
+      "zero_silent_failures": true
+    }
+  }
+}

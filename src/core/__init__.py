@@ -133,6 +133,21 @@ from .scoring_contract import (
     ScoringContract,
 )
 
+try:
+    from .trade_management_engine import (
+        ManagedTrade,
+        PositionSide,
+        TPLevel,
+        TradeManagementDecision,
+        TradeManagementEngine,
+    )
+except ImportError:
+    ManagedTrade = None
+    PositionSide = None
+    TPLevel = None
+    TradeManagementDecision = None
+    TradeManagementEngine = None
+
 # ============================================================================
 # Operator Controls (v10.2+)
 # ============================================================================
@@ -427,6 +442,11 @@ __all__ = [
     'MarketState',
     'BiasEngine',
     'ScoringContract',
+    'TradeManagementEngine',
+    'ManagedTrade',
+    'PositionSide',
+    'TPLevel',
+    'TradeManagementDecision',
     
     # Operator Controls
     'OperatorControlLayer',

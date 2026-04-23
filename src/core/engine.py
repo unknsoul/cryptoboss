@@ -248,15 +248,31 @@ class TradingEngine:
                 # Generate signal
                 if hasattr(strategy, "generate_signal"):
                     signal = strategy.generate_signal(df, index, price)
+                    signal_payload: Dict[str, Any]
+
+                    # Support both legacy dict outputs and v11+ SignalResult objects.
+                    if isinstance(signal, dict):
+                        signal_payload = signal
+                    elif hasattr(strategy, "signal_to_legacy_dict"):
+                        signal_payload = strategy.signal_to_legacy_dict(signal)
+                    elif hasattr(signal, "action"):
+                        signal_payload = {
+                            "action": getattr(signal, "action", "HOLD"),
+                            "size": getattr(signal, "size", 0.0),
+                            "price": getattr(signal, "price", price),
+                            "reason": getattr(signal, "reason", ""),
+                        }
+                    else:
+                        signal_payload = {"action": "HOLD"}
                     
-                    if signal.get("action") in ("BUY", "SELL"):
+                    if signal_payload.get("action") in ("BUY", "SELL"):
                         # Create order intent
                         intent = OrderIntent(
                             symbol=symbol,
-                            side=OrderSide.BUY if signal["action"] == "BUY" else OrderSide.SELL,
+                            side=OrderSide.BUY if signal_payload["action"] == "BUY" else OrderSide.SELL,
                             order_type=OrderType.MARKET,
-                            quantity=signal.get("size", 0),
-                            price=signal.get("price", price),
+                            quantity=signal_payload.get("size", 0),
+                            price=signal_payload.get("price", price),
                             strategy_id=strategy_id
                         )
                         
@@ -265,7 +281,7 @@ class TradingEngine:
                         
                         if result.success:
                             # Update strategy P&L
-                            pnl = signal.get("pnl", 0)
+                            pnl = signal_payload.get("pnl", 0)
                             info["pnl"] += pnl
                             self.risk_guardian.record_trade(pnl, strategy_id)
                             
