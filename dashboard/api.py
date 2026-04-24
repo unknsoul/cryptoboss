@@ -187,7 +187,7 @@ class EnvironmentSignature:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._mode = "paper"
+            cls._instance._mode = "testnet"
             cls._instance._started_at = datetime.now()
             cls._instance._checksum = None
         return cls._instance
@@ -413,8 +413,8 @@ class DashboardState:
         CRITICAL: Paper mode is removed. Only testnet/live allowed.
         """
         # Validate mode - reject paper
-        if new_mode.lower() == "paper":
-            logger.warning("⚠️ Paper mode requested but disabled - using testnet")
+        if new_mode.lower() not in ("testnet", "live"):
+            logger.warning(f"⚠️ Invalid mode '{new_mode}' requested — using testnet")
             new_mode = "testnet"
         
         self.session_id = str(uuid.uuid4())
@@ -1950,6 +1950,14 @@ async def get_strategies():
     return {"strategies": strategies}
 
 
+@app.get("/api/scalper/aggressive/status")
+async def get_aggressive_scalper_status():
+    """Current status of the AggressiveScalper."""
+    if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
+        raise HTTPException(status_code=503, detail="AggressiveScalper not available")
+    return wrap_response(_aggressive_scalper_instance.get_status())
+
+
 
 @app.get("/api/v2/smc/state")
 async def get_smc_state(symbol: str = "BTC/USDT", timeframe: str = "5m", limit: int = 400):
@@ -2925,7 +2933,7 @@ async def broadcast_price_update(tick: PriceTick):
 # === Real Trading Loop ===
 
 _trading_loop_task = None
-_aggressive_scalper_instance = None
+
 
 
 async def real_trading_loop():

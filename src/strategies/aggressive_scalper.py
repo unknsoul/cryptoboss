@@ -259,3 +259,23 @@ class AggressiveScalper(BaseStrategy):
             action="HOLD",
             reason=f"no_confluence buy={buy_signals}/4 sell={sell_signals}/4 ADX={adx_now:.0f}",
         )
+
+    def get_status(self) -> dict:
+        """Return current strategy status for API/dashboard consumption."""
+        now = datetime.now()
+        return {
+            "strategy": self.strategy_id,
+            "version": self.version,
+            "symbol": self.config.symbol,
+            "halted": self._daily_pnl < -(self.params.daily_loss_halt_pct / 100 * 50000),
+            "daily_loss_pct": round(abs(self._daily_pnl) / 50000 * 100, 3) if self._daily_pnl < 0 else 0.0,
+            "daily_loss_halt_pct": self.params.daily_loss_halt_pct,
+            "trades_last_hour": self._hourly_trade_count,
+            "max_trades_per_hour": self.params.max_trades_per_hour,
+            "leverage": 15,
+            "stop_loss_pct": self.params.stop_loss_pct,
+            "take_profit_pct": self.params.take_profit_pct,
+            "adx_min_trend": self.params.adx_min_trend,
+            "cooldown_seconds": self.params.cooldown_seconds,
+            "signals_generated": self._signals_generated,
+        }

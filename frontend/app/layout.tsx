@@ -126,7 +126,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
             <Topbar
                 sidebarCollapsed={sidebarCollapsed}
                 systemStatus={systemStatus}
-                tradingMode={state.mode === 'live' ? 'live' : 'paper'}
+                tradingMode={state.mode === 'live' ? 'live' : 'testnet'}
                 lastDecision={lastDecisionTime}
                 onKillSwitch={handleKillSwitch}
                 onModeToggle={() => handleModeChange(state.mode === 'live' ? 'testnet' : 'live')}

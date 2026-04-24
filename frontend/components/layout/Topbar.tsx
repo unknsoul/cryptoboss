@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 interface TopbarProps {
     systemStatus: 'healthy' | 'warning' | 'critical' | 'unknown';
-    tradingMode: 'paper' | 'live';
+    tradingMode: 'testnet' | 'live';
     lastDecision: string | null;
     onKillSwitch: () => void;
     onModeToggle: () => void;
@@ -46,7 +46,7 @@ export function Topbar({
     };
 
     const handleModeClick = () => {
-        if (tradingMode === 'paper') {
+        if (tradingMode === 'testnet') {
             setShowModeConfirm(true);
         } else {
             onModeToggle();
@@ -84,12 +84,12 @@ export function Topbar({
                         {/* Mode Toggle */}
                         <button
                             onClick={handleModeClick}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tradingMode === 'paper'
-                                    ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tradingMode === 'testnet'
+                                    ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
                                     : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                                 }`}
                         >
-                            {tradingMode === 'paper' ? 'PAPER' : 'LIVE'}
+                            {tradingMode === 'testnet' ? 'TESTNET' : 'LIVE'}
                         </button>
 
                         {/* Kill Switch */}

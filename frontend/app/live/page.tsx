@@ -10,7 +10,8 @@
 import { useState, useEffect, useCallback } from 'react';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'];
-const API_URL = 'http://localhost:8000/api/prices/live';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = `${API_BASE}/api/prices/live`;
 const POLL_INTERVAL = 3000;
 
 interface Price {

@@ -9,7 +9,7 @@ This is the main orchestrator that ties together:
 - Strategies: DCA, Grid, Market Making, etc.
 
 Usage:
-    engine = TradingEngine(mode="paper")
+    engine = TradingEngine(mode="testnet")
     engine.add_strategy("dca", DCAStrategy(...))
     engine.start()
 """
