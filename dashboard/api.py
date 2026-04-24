@@ -145,6 +145,16 @@ except ImportError as e:
     IntradayScalper = Any  # type: ignore
     logging.warning(f"v12 modules not available: {e}")
 
+# AggressiveScalper strategy import
+try:
+    from src.strategies.aggressive_scalper import AggressiveScalper, ScalperParams
+    AGGRESSIVE_SCALPER_AVAILABLE = True
+except ImportError as e:
+    AGGRESSIVE_SCALPER_AVAILABLE = False
+    AggressiveScalper = Any  # type: ignore
+    ScalperParams = Any  # type: ignore
+    logging.warning(f"AggressiveScalper not available: {e}")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Dashboard")
 
@@ -902,6 +912,19 @@ else:
     v12_scalper = None
 
 
+# === AggressiveScalper Instance ===
+
+if AGGRESSIVE_SCALPER_AVAILABLE:
+    try:
+        _aggressive_scalper_instance = AggressiveScalper()
+        logger.info(f"AggressiveScalper instantiated: {_aggressive_scalper_instance.strategy_id}")
+    except Exception as e:
+        _aggressive_scalper_instance = None
+        logger.warning(f"Failed to instantiate AggressiveScalper: {e}")
+else:
+    _aggressive_scalper_instance = None
+
+
 # === WebSocket Manager ===
 
 class ConnectionManager:
@@ -971,44 +994,47 @@ async def switch_session(request: SessionSwitchRequest):
     """
     mode = request.mode.lower()
     
-    if mode not in ["paper", "testnet", "live"]:
-        raise HTTPException(status_code=400, detail="Invalid mode. Must be: paper, testnet, or live")
+    if mode not in ["testnet", "live"]:
+        raise HTTPException(status_code=400, detail="Invalid mode. Must be: testnet or live")
     
-    # For non-paper modes, validate API credentials
+    # Always require API credentials — paper mode removed
     balances = {}
-    if mode != "paper":
-        if not request.api_key or not request.api_secret:
-            raise HTTPException(status_code=400, detail="API credentials required for non-paper mode")
+    if not request.api_key or not request.api_secret:
+        raise HTTPException(status_code=400, detail="API credentials required")
+    
+    if not BINANCE_AVAILABLE:
+        raise HTTPException(status_code=500, detail="Exchange client not available")
+    
+    try:
+        # Create client and validate
+        testnet = mode == "testnet"
+        client = BinanceClient(
+            api_key=request.api_key,
+            api_secret=request.api_secret,
+            testnet=testnet
+        )
         
-        if not BINANCE_AVAILABLE:
-            raise HTTPException(status_code=500, detail="Exchange client not available")
+        validation = await client.validate_credentials()
         
-        try:
-            # Create client and validate
-            testnet = mode == "testnet"
-            client = BinanceClient(
-                api_key=request.api_key,
-                api_secret=request.api_secret,
-                testnet=testnet
-            )
-            
-            validation = await client.validate_credentials()
-            
-            if not validation["success"]:
-                await client.destroy()
-                raise HTTPException(status_code=401, detail=f"Invalid credentials: {validation['message']}")
-            
-            balances = validation.get("balances", {})
-            
-            # Store the client in state
-            state.exchange_client = client
-            state.api_validated = True
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Session switch error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+        if not validation["success"]:
+            await client.destroy()
+            raise HTTPException(status_code=401, detail=f"Invalid credentials: {validation['message']}")
+        
+        balances = validation.get("balances", {})
+        
+        # Store the client in state
+        state.exchange_client = client
+        state.api_validated = True
+        
+        # Start real trading loop now that exchange is connected
+        await start_real_trading_loop()
+        logger.info(f"Trading loop started for {mode.upper()} mode")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session switch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     
     # Reset state for new session
     state.reset(mode)
@@ -1571,6 +1597,12 @@ async def toggle_kill_switch(active: bool = True, reason: str = "Manual activati
         "reason": reason
     })
     
+    # Stop/start trading loop based on kill switch
+    if active:
+        await stop_real_trading_loop()
+    else:
+        await start_real_trading_loop()
+    
     logger.warning(f"Kill switch {'ACTIVATED' if active else 'DEACTIVATED'}: {reason}")
     
     return {
@@ -1831,23 +1863,92 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
         })
 
 
+@app.get("/api/pnl/history")
+async def get_pnl_history():
+    """
+    Get cumulative P/L history for the PLGraph component.
+    
+    Returns points array sorted by time with running total.
+    Uses in-memory trades from state (works with both SQLite and legacy fallback).
+    """
+    closed_trades = [t for t in state.trades if t.get("side") == "SELL" and t.get("pnl") is not None]
+    
+    if not closed_trades:
+        return wrap_response({
+            "points": [],
+            "total_pnl": 0.0,
+            "win_rate": 0.0,
+            "total_trades": 0,
+            "message": "No closed trades yet — P/L graph will populate as trades close"
+        })
+    
+    # Build cumulative P/L series
+    points = []
+    running_pnl = 0.0
+    wins = 0
+    losses = 0
+    
+    for trade in closed_trades:
+        pnl = float(trade.get("pnl", 0))
+        running_pnl += pnl
+        if pnl > 0:
+            wins += 1
+        elif pnl < 0:
+            losses += 1
+        
+        points.append({
+            "time": trade.get("time", datetime.now().isoformat()),
+            "pnl": round(running_pnl, 4),
+            "trade_pnl": round(pnl, 4),
+            "symbol": trade.get("symbol", "BTC/USDT"),
+        })
+    
+    total_closed = wins + losses
+    win_rate = (wins / total_closed * 100) if total_closed > 0 else 0.0
+    
+    return wrap_response({
+        "points": points,
+        "total_pnl": round(running_pnl, 4),
+        "win_rate": round(win_rate, 1),
+        "total_trades": total_closed,
+        "wins": wins,
+        "losses": losses,
+    })
+
+
 @app.get("/api/strategies")
 async def get_strategies():
     """Get active strategies."""
-    return {
-        "strategies": [
-            {
-                "id": "dca_btc_usdt",
-                "type": "DCA",
-                "symbol": "BTC/USDT",
-                "status": "active",
-                "pnl": round(state.total_pnl, 2),
-                "trades": state.total_trades,
-                "win_rate": round(state.win_rate, 1),
-                "position": state.position
-            }
-        ]
-    }
+    strategies = [
+        {
+            "id": "dca_btc_usdt",
+            "type": "DCA",
+            "symbol": "BTC/USDT",
+            "status": "active",
+            "pnl": round(state.total_pnl, 2),
+            "trades": state.total_trades,
+            "win_rate": round(state.win_rate, 1),
+            "position": state.position
+        }
+    ]
+    
+    # Add AggressiveScalper if available
+    if AGGRESSIVE_SCALPER_AVAILABLE and _aggressive_scalper_instance:
+        metrics = _aggressive_scalper_instance.get_metrics()
+        strategies.append({
+            "id": "aggressive_scalper_v1",
+            "type": "AggressiveScalper",
+            "symbol": "BTC/USDT",
+            "status": "active" if state.api_validated else "waiting",
+            "pnl": 0,
+            "trades": metrics.get("signals_generated", 0),
+            "win_rate": 0,
+            "position": 0,
+            "confidence_threshold": 0.6,
+        })
+    
+    return {"strategies": strategies}
+
 
 
 @app.get("/api/v2/smc/state")
@@ -2792,7 +2893,12 @@ async def websocket_prices(websocket: WebSocket):
 
 
 async def broadcast_price_update(tick: PriceTick):
-    """Broadcast price update to all connected WebSocket clients."""
+    """Receive price from real market data service and broadcast to WebSocket clients."""
+    # Update in-memory state so REST endpoints also return real prices
+    if tick.symbol in ("BTC/USDT", "BTCUSDT"):
+        state.current_price = tick.price
+        state.last_price = tick.price
+    
     if not price_clients:
         return
         
@@ -2816,141 +2922,180 @@ async def broadcast_price_update(tick: PriceTick):
 
 # === Background Tasks ===
 
-async def price_and_trading_simulator():
-    """Simulate price updates and DCA trading activity."""
-    trade_cooldown = 0
+# === Real Trading Loop ===
+
+_trading_loop_task = None
+_aggressive_scalper_instance = None
+
+
+async def real_trading_loop():
+    """
+    Main trading loop — runs when a real exchange client is connected.
+    Fetches OHLCV data, runs strategies, executes real orders on Binance.
+    Loops every 30 seconds.
+    """
+    SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    LOOP_INTERVAL = 30  # seconds between signal checks
+    
+    logger.info("Real trading loop starting...")
     
     while True:
         try:
-            # Random price walk
-            change_pct = random.gauss(0, 0.001)  # 0.1% std dev
-            state.last_price = state.current_price
-            state.current_price = max(50000, min(80000, state.current_price * (1 + change_pct)))
+            # Only run if exchange client is connected
+            if state.exchange_client is None or not state.api_validated:
+                await asyncio.sleep(LOOP_INTERVAL)
+                continue
             
-            price_change_pct = ((state.current_price - state.last_price) / state.last_price) * 100
+            if state.kill_switch_active:
+                logger.info("Kill switch active — trading loop paused")
+                await asyncio.sleep(LOOP_INTERVAL)
+                continue
             
-            # Update price history
-            state.price_history.append({
-                "time": datetime.now().isoformat(),
-                "price": state.current_price
-            })
-            if len(state.price_history) > 100:
-                state.price_history = state.price_history[-100:]
+            if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
+                await asyncio.sleep(LOOP_INTERVAL)
+                continue
             
-            # Broadcast price update
-            await manager.broadcast({
-                "type": "price",
-                "symbol": "BTC/USDT",
-                "price": round(state.current_price, 2),
-                "change_pct": round(price_change_pct, 4),
-                "timestamp": datetime.now().isoformat()
-            })
+            # Fetch balance
+            try:
+                balance = await state.exchange_client.get_balance()
+                usdt_free = 0
+                for k, v in balance.items():
+                    if k == "USDT":
+                        usdt_free = v if isinstance(v, (int, float)) else v.get("free", 0)
+                        break
+                if usdt_free < 10:
+                    logger.warning(f"Insufficient USDT balance: ${usdt_free:.2f} — skipping cycle")
+                    await asyncio.sleep(LOOP_INTERVAL)
+                    continue
+            except Exception as e:
+                logger.error(f"Balance fetch failed: {e}")
+                await asyncio.sleep(LOOP_INTERVAL)
+                continue
             
-            # Simulated DCA Trading Logic
-            trade_cooldown -= 1
-            
-            if trade_cooldown <= 0:
-                # Check if we should enter a position (price dip)
-                if state.position == 0 and random.random() < 0.05:  # 5% chance to buy
-                    # Buy some BTC
-                    invest_amount = state.capital * 0.1  # 10% of capital
-                    btc_amount = invest_amount / state.current_price
-                    fee = invest_amount * 0.001
+            # Run strategy on each symbol
+            for symbol in SYMBOLS:
+                try:
+                    # Get OHLCV candles
+                    candles = await state.exchange_client.get_ohlcv(symbol, timeframe="5m", limit=100)
+                    if not candles:
+                        continue
+                    df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    current_price = float(df["close"].iloc[-1])
                     
-                    state.capital -= (invest_amount + fee)
-                    state.position = btc_amount
-                    state.position_entry_price = state.current_price
-                    state.total_trades += 1
+                    # Update state price
+                    if symbol == "BTC/USDT":
+                        state.current_price = current_price
                     
-                    trade = {
-                        "id": len(state.trades) + 1,
-                        "time": datetime.now().isoformat(),
-                        "symbol": "BTC/USDT",
-                        "side": "BUY",
-                        "amount": round(btc_amount, 6),
-                        "price": round(state.current_price, 2),
-                        "pnl": 0,
-                        "reason": "DCA_ENTRY"
-                    }
-                    state.trades.append(trade)
+                    # Set strategy symbol and generate signal
+                    _aggressive_scalper_instance.config.symbol = symbol
+                    signal = _aggressive_scalper_instance.generate_signal(
+                        df, len(df) - 1, current_price
+                    )
                     
-                    await manager.broadcast({"type": "trade", **trade})
-                    trade_cooldown = random.randint(10, 30)  # Wait 10-30 seconds
-                
-                # Check if we should exit (take profit or stop loss)
-                elif state.position > 0:
-                    pnl_pct = ((state.current_price - state.position_entry_price) / state.position_entry_price) * 100
-                    
-                    # Take profit at +2% or stop loss at -3%
-                    if pnl_pct >= 2.0 or pnl_pct <= -3.0 or random.random() < 0.02:
-                        proceeds = state.position * state.current_price
-                        fee = proceeds * 0.001
-                        pnl = (state.current_price - state.position_entry_price) * state.position - fee
+                    if signal.action in ("BUY", "SELL") and signal.confidence >= 0.6:
+                        # Calculate order size
+                        position_usdt = usdt_free * 0.08  # 8% of free capital
                         
-                        state.capital += (proceeds - fee)
-                        state.pnl += pnl
-                        state.total_trades += 1
+                        if position_usdt < 10:
+                            continue
                         
-                        if pnl > 0:
-                            state.winning_trades += 1
-                        else:
-                            state.losing_trades += 1
+                        side = "buy" if signal.action == "BUY" else "sell"
+                        quantity = position_usdt / current_price
                         
-                        reason = "TAKE_PROFIT" if pnl_pct >= 2.0 else ("STOP_LOSS" if pnl_pct <= -3.0 else "SIGNAL")
+                        logger.info(
+                            f"SIGNAL: {signal.action} {symbol} @ {current_price:.4f} | "
+                            f"qty={quantity:.6f} | confidence={signal.confidence:.2f} | "
+                            f"SL={signal.stop_loss:.4f} TP={signal.take_profit:.4f}"
+                        )
                         
-                        trade = {
-                            "id": len(state.trades) + 1,
-                            "time": datetime.now().isoformat(),
-                            "symbol": "BTC/USDT",
-                            "side": "SELL",
-                            "amount": round(state.position, 6),
-                            "price": round(state.current_price, 2),
-                            "pnl": round(pnl, 2),
-                            "reason": reason
-                        }
-                        state.trades.append(trade)
-                        state.position = 0
-                        state.position_entry_price = 0
-                        
-                        await manager.broadcast({"type": "trade", **trade})
-                        trade_cooldown = random.randint(5, 15)
+                        # Place real order
+                        try:
+                            order = await state.exchange_client.create_order(
+                                symbol=symbol,
+                                side=side,
+                                order_type="market",
+                                amount=round(quantity, 6),
+                            )
+                            
+                            logger.info(f"Order placed: {order}")
+                            
+                            # Record trade
+                            state.total_trades += 1
+                            trade_record = {
+                                "id": state.total_trades,
+                                "time": datetime.now().isoformat(),
+                                "symbol": symbol,
+                                "side": signal.action,
+                                "amount": round(quantity, 6),
+                                "price": current_price,
+                                "pnl": 0,
+                                "reason": signal.reason[:80],
+                                "order_id": order.get("id", ""),
+                                "confidence": signal.confidence,
+                            }
+                            state.trades.append(trade_record)
+                            
+                            # Broadcast to WebSocket clients
+                            await manager.broadcast({
+                                "type": "trade",
+                                **trade_record,
+                            })
+                            
+                        except Exception as order_error:
+                            logger.error(f"Order placement failed for {symbol}: {order_error}")
+
+                except Exception as symbol_error:
+                    logger.error(f"Error processing {symbol}: {symbol_error}")
+                    continue
             
-            # Broadcast status update every few seconds
-            await manager.broadcast({
-                "type": "status_update",
-                "portfolio_value": round(state.portfolio_value, 2),
-                "pnl": round(state.total_pnl, 2),
-                "pnl_pct": round((state.total_pnl / state.initial_capital * 100), 2) if state.initial_capital > 0 else 0,
-                "trades_count": state.total_trades,
-                "win_rate": round(state.win_rate, 1),
-                "position": round(state.position, 6)
-            })
-            
-            await asyncio.sleep(1)
+            await asyncio.sleep(LOOP_INTERVAL)
             
         except asyncio.CancelledError:
+            logger.info("Real trading loop cancelled")
             break
-        except Exception as e:
-            logger.error(f"Simulator error: {e}")
-            await asyncio.sleep(5)
+        except Exception as loop_error:
+            logger.error(f"Trading loop error: {loop_error}")
+            await asyncio.sleep(60)  # Back off on error
+
+
+async def start_real_trading_loop():
+    """Start the real trading loop task. Called when exchange client is connected."""
+    global _trading_loop_task
+    if _trading_loop_task is None or _trading_loop_task.done():
+        _trading_loop_task = asyncio.create_task(real_trading_loop())
+        logger.info("Real trading loop task started")
+
+
+async def stop_real_trading_loop():
+    """Stop the real trading loop task."""
+    global _trading_loop_task
+    if _trading_loop_task and not _trading_loop_task.done():
+        _trading_loop_task.cancel()
+        try:
+            await _trading_loop_task
+        except asyncio.CancelledError:
+            pass
+        _trading_loop_task = None
+        logger.info("Real trading loop stopped")
 
 
 @app.on_event("startup")
 async def startup():
-    """Start background tasks."""
-    asyncio.create_task(price_and_trading_simulator())
-    
-    # vFINAL: Start market data service for real-time prices
+    """Start background tasks — real market data only, no simulator."""
+    # Real Binance market data (public WebSocket — no API key required)
     if MARKET_DATA_AVAILABLE:
         try:
             service = get_market_data_service()
             service.subscribe(broadcast_price_update)
             await service.start()
-            logger.info("🚀 Market data service started - real-time prices from Binance")
+            logger.info("Market data service started — real-time prices from Binance")
         except Exception as e:
-            logger.warning(f"Could not start market data service: {e}")
-    
-    logger.info("Dashboard API started with trading simulator")
+            logger.warning(f"Market data service failed to start: {e}")
+            logger.warning("Prices will show as 0 until a session is connected")
+    else:
+        logger.warning("Market data service not available — install dependencies")
+
+    logger.info("CryptoBoss API ready — no simulator running")
 
 
 # Mount static files

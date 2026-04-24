@@ -124,6 +124,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
             />
 
             <Topbar
+                sidebarCollapsed={sidebarCollapsed}
                 systemStatus={systemStatus}
                 tradingMode={state.mode === 'live' ? 'live' : 'paper'}
                 lastDecision={lastDecisionTime}

@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────
+# AggressiveScalper Configuration — CryptoBoss
+# ─────────────────────────────────────────────────────────────
+
+strategy:
+  id: aggressive_scalper_v1
+  version: "1.0"
+  type: AggressiveScalper
+  enabled: true
+
+# ── Indicators ────────────────────────────────────────────────
+rsi:
+  period: 14
+  oversold: 30.0
+  overbought: 70.0
+
+macd:
+  fast: 12
+  slow: 26
+  signal: 9
+
+volume:
+  ma_period: 20
+  spike_threshold: 1.5   # must be >= 1.5x 20-bar average
+
+adx:
+  period: 14
+  min_trend: 20.0        # skip if ADX < 20 (choppy market)
+
+# ── Risk Management ──────────────────────────────────────────
+risk:
+  stop_loss_pct: 0.4     # 0.4% stop loss
+  take_profit_pct: 1.2   # 1.2% take profit (3:1 R/R)
+  max_position_pct: 8.0  # 8% of capital per trade
+  leverage: 1            # spot trading (no margin for testnet)
+
+# ── Safety Guards ────────────────────────────────────────────
+guards:
+  max_trades_per_hour: 8
+  daily_loss_halt_pct: 3.0
+  cooldown_seconds: 90
+
+# ── Symbols ──────────────────────────────────────────────────
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+
+timeframe: "5m"

@@ -146,7 +146,7 @@ class MarketDataService:
             
         # Build stream URL - ALWAYS use mainnet for real prices
         streams = "/".join([f"{s.lower()}@ticker" for s in self.symbols])
-        url = f"{BINANCE_WS_MAINNET}/stream?streams={streams}"
+        url = f"wss://stream.binance.com:9443/stream?streams={streams}"
         
         logger.info(f"📡 Connecting to Binance WebSocket: {url[:60]}...")
         

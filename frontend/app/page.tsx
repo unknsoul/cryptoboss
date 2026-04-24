@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { LivePricesGrid, PriceStatusBanner } from '@/components/LivePriceCard';
+import { PLGraph } from '@/components/PLGraph';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -11,7 +12,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
  * 
  * Purpose: Allow user to understand system health in under 10 seconds
  * Rules:
- * - No charts
+ * - No charts (except P/L graph)
  * - Large readable values
  * - Neutral colors only
  * - v10.2: Safety metrics displayed BEFORE profit metrics
@@ -90,6 +91,7 @@ export default function OverviewPage() {
     const [lastUpdate, setLastUpdate] = useState('--:--:--');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // System data state
     const [systemData, setSystemData] = useState({
@@ -175,11 +177,14 @@ export default function OverviewPage() {
     useEffect(() => {
         setMounted(true);
         fetchData();
+        intervalRef.current = setInterval(fetchData, 5000);
 
-        // Refresh every 5 seconds
-        const interval = setInterval(fetchData, 5000);
-        return () => clearInterval(interval);
-    }, [fetchData]);
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+        };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 
     const getDrawdownVariant = (current: number, max: number) => {
@@ -271,6 +276,17 @@ export default function OverviewPage() {
                 </div>
                 <PriceStatusBanner className="mb-3" />
                 <LivePricesGrid />
+            </div>
+
+            {/* P/L GRAPH SECTION */}
+            <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-4 h-4 text-[#5b7a9d]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    <h2 className="text-sm font-medium text-[#5b7a9d] uppercase tracking-wider">Performance</h2>
+                </div>
+                <PLGraph apiUrl={API_URL} />
             </div>
 
             {/* v10.2: Safety Metrics Section (BEFORE profit metrics) */}

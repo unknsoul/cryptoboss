@@ -8,6 +8,7 @@ interface TopbarProps {
     lastDecision: string | null;
     onKillSwitch: () => void;
     onModeToggle: () => void;
+    sidebarCollapsed: boolean;
 }
 
 export function Topbar({
@@ -16,6 +17,7 @@ export function Topbar({
     lastDecision,
     onKillSwitch,
     onModeToggle,
+    sidebarCollapsed,
 }: TopbarProps) {
     const [showKillConfirm, setShowKillConfirm] = useState(false);
     const [showModeConfirm, setShowModeConfirm] = useState(false);
@@ -58,7 +60,7 @@ export function Topbar({
 
     return (
         <>
-            <header className="fixed top-0 right-0 left-56 z-30 h-14 bg-[#0f1419] border-b border-[#2d3640] transition-all duration-300">
+            <header className={`fixed top-0 right-0 z-30 h-14 bg-[#0f1419] border-b border-[#2d3640] transition-all duration-300 ${sidebarCollapsed ? 'left-16' : 'left-56'}`}>
                 <div className="flex h-full items-center justify-between px-6">
                     {/* Left: System Status */}
                     <div className="flex items-center gap-4">

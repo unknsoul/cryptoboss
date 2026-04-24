@@ -41,7 +41,7 @@ class EngineStatus(Enum):
 @dataclass
 class EngineConfig:
     """Engine configuration."""
-    mode: str = "paper"  # "paper", "live", "testnet"
+    mode: str = "testnet"  # "testnet" or "live" only — paper mode removed
     portfolio_value: float = 10000.0
     auto_recover: bool = True  # Recover strategies on restart
     heartbeat_interval: int = 60  # Seconds
@@ -442,7 +442,7 @@ class TradingEngine:
 
 # Factory function for easy instantiation
 def create_engine(
-    mode: str = "paper",
+    mode: str = "testnet",
     portfolio_value: float = 10000.0,
     exchange_client = None
 ) -> TradingEngine:
