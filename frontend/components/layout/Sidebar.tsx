@@ -19,6 +19,7 @@ const navigation: NavigationItem[] = [
     { name: 'Positions', href: '/positions', icon: 'briefcase' },
     { name: 'Risk & Capital', href: '/risk', icon: 'shield' },
     { name: 'Strategies', href: '/strategies', icon: 'cpu' },
+    { name: 'Analytics', href: '/analytics', icon: 'layers' },
     { name: 'SMC', href: '/smc', icon: 'ChartBar', group: 'SCALPER V4' },
     { name: 'Scalper', href: '/scalper', icon: 'Zap', group: 'SCALPER V4' },
     { name: 'Builder', href: '/builder', icon: 'Blocks', group: 'SCALPER V4' },
@@ -207,4 +208,3 @@ export function Sidebar({
         </aside>
     );
 }
-

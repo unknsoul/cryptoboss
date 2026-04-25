@@ -46,6 +46,14 @@ except ImportError as e:
     INDICATOR_LIBRARY = {}  # type: ignore
     logging.warning(f"v4 modules not available: {e}")
 
+try:
+    from src.analytics import TradeAnalyticsService
+    ANALYTICS_AVAILABLE = True
+except ImportError as e:
+    ANALYTICS_AVAILABLE = False
+    TradeAnalyticsService = Any  # type: ignore
+    logging.warning(f"Analytics services not available: {e}")
+
 # Import session manager
 try:
     from src.core.session_manager import get_session_manager, TradingMode
@@ -585,6 +593,7 @@ def _risk_limits_snapshot() -> Dict[str, Any]:
 
 
 risk_settings = _load_risk_settings()
+trade_analytics = TradeAnalyticsService() if ANALYTICS_AVAILABLE else None
 
 
 def _set_engine_status(status: str) -> None:
@@ -687,6 +696,37 @@ async def _restore_active_account_runtime(user: User, account: ExchangeAccount) 
     balances = await _attach_exchange_client_for_account(user.user_id, account)
     await start_real_trading_loop()
     return balances
+
+
+def _require_trade_analytics() -> "TradeAnalyticsService":
+    """Return the analytics service or raise a service-unavailable error."""
+    if not ANALYTICS_AVAILABLE or trade_analytics is None:
+        raise HTTPException(status_code=503, detail="Analytics service is unavailable")
+    return trade_analytics
+
+
+def _load_analytics_trade_records(user: User, limit: int = 5000) -> tuple[Optional[str], list[dict[str, Any]], float]:
+    """Load recent trades for the user's active account for analytics views."""
+    initial_capital = _capital_reference()
+
+    active_account_id = getattr(state, "active_exchange_account_id", None) or _lookup_persisted_active_account_id(user.user_id)
+    if active_account_id:
+        try:
+            from src.core.database.repository import get_repository
+
+            repo = get_repository()
+            trades = repo.get_trades(user.user_id, active_account_id, limit=limit)
+            return active_account_id, trades, initial_capital
+        except Exception as exc:
+            logger.warning(f"Failed to load analytics trades from SQLite: {exc}")
+
+    if BOT_INSTANCE_AVAILABLE:
+        bot = get_active_bot()
+        if bot:
+            trade_history = bot.trading_state.trade_history[-limit:]
+            return active_account_id, trade_history, initial_capital
+
+    return active_account_id, [], initial_capital
 
 
 # === v12 Runtime Objects & Helpers ===
@@ -2396,6 +2436,72 @@ async def update_risk_settings(request: RiskSettingsUpdateRequest):
         "success": True,
         "risk": _risk_limits_snapshot(),
     })
+
+
+@app.get("/api/analytics/today")
+async def get_analytics_today(user: User = Depends(require_auth)):
+    """Return today's trading analytics summary."""
+    service = _require_trade_analytics()
+    active_account_id, trades, initial_capital = _load_analytics_trade_records(user)
+    summary = service.today_summary(trades, initial_capital=initial_capital)
+    summary["exchange_account_id"] = active_account_id
+    return wrap_legacy_response(summary, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/hourly-performance")
+async def get_analytics_hourly_performance(user: User = Depends(require_auth)):
+    """Return hourly win-rate and heatmap analytics."""
+    service = _require_trade_analytics()
+    active_account_id, trades, _ = _load_analytics_trade_records(user)
+    payload = service.hourly_performance(trades)
+    payload["exchange_account_id"] = active_account_id
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/symbol-performance")
+async def get_analytics_symbol_performance(user: User = Depends(require_auth)):
+    """Return symbol-level performance stats."""
+    service = _require_trade_analytics()
+    active_account_id, trades, _ = _load_analytics_trade_records(user)
+    payload = {
+        "exchange_account_id": active_account_id,
+        "symbols": service.symbol_performance(trades),
+    }
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/strategy-breakdown")
+async def get_analytics_strategy_breakdown(user: User = Depends(require_auth)):
+    """Return strategy-level performance stats."""
+    service = _require_trade_analytics()
+    active_account_id, trades, _ = _load_analytics_trade_records(user)
+    payload = {
+        "exchange_account_id": active_account_id,
+        "strategies": service.strategy_breakdown(trades),
+    }
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/weekly-equity")
+async def get_analytics_weekly_equity(user: User = Depends(require_auth)):
+    """Return weekly equity-curve points."""
+    service = _require_trade_analytics()
+    active_account_id, trades, initial_capital = _load_analytics_trade_records(user)
+    payload = service.weekly_equity(trades, initial_capital=initial_capital)
+    payload["exchange_account_id"] = active_account_id
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/drawdown-periods")
+async def get_analytics_drawdown_periods(user: User = Depends(require_auth)):
+    """Return drawdown periods derived from closed-trade history."""
+    service = _require_trade_analytics()
+    active_account_id, trades, initial_capital = _load_analytics_trade_records(user)
+    payload = {
+        "exchange_account_id": active_account_id,
+        "periods": service.drawdown_periods(trades, initial_capital=initial_capital),
+    }
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
 
 
 @app.get("/api/replay/sessions")
