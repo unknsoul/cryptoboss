@@ -396,6 +396,7 @@ class DashboardState:
         # System state - PAPER REMOVED
         self.environment = "testnet"  # testnet or live ONLY
         self.connection_status = "disconnected"  # disconnected, connecting, connected, error
+        self.engine_status = "stopped"
         self.timestamp_offset_ms = 0
         self.last_time_sync = None
         self.kill_switch_active = False
@@ -454,7 +455,16 @@ class DashboardState:
         # Reset system state
         self.environment = new_mode
         self.connection_status = "disconnected"  # Must connect to exchange
+        self.engine_status = "stopped"
         self.timestamp_offset_ms = 0
+        self.last_time_sync = None
+        self.kill_switch_active = False
+        self.kill_switch_reason = None
+        self.incident_state = "NORMAL"
+        self.incident_reason = None
+        self.incident_started_at = None
+        self.trading_paused = False
+        self.trading_pause_reason = None
         self.market_context = "UNKNOWN"
         self.market_bias = "NEUTRAL"
         self.recent_decisions = []
@@ -495,6 +505,26 @@ class DashboardState:
         return (self.winning_trades / self.total_trades) * 100
 
 state = DashboardState()
+
+ROOT_WS_HEARTBEAT_SECONDS = 3.0
+
+
+def _set_engine_status(status: str) -> None:
+    """Centralize backend engine status updates."""
+    state.engine_status = status
+
+
+def _resolved_engine_status() -> str:
+    """Return the effective engine status exposed to clients."""
+    if state.engine_status == "stopped":
+        return "stopped"
+    if state.kill_switch_active or state.trading_paused or state.incident_state != "NORMAL":
+        return "paused"
+    if _trading_loop_task is not None and not _trading_loop_task.done():
+        return "running"
+    if state.api_validated and state.exchange_client is not None:
+        return state.engine_status
+    return "stopped"
 
 
 # === v12 Runtime Objects & Helpers ===
@@ -995,9 +1025,10 @@ async def get_session():
         "session_id": state.session_id,
         "mode": state.mode,
         "created_at": state.start_time.isoformat(),
-        "is_running": True,
+        "is_running": _resolved_engine_status() == "running",
+        "engine_status": _resolved_engine_status(),
         "api_validated": state.api_validated,
-        "connection_status": "connected" if state.api_validated else "disconnected"
+        "connection_status": state.connection_status
     }
 
 
@@ -1087,7 +1118,8 @@ async def switch_session(request: SessionSwitchRequest):
         "mode": mode,
         "created_at": state.start_time.isoformat(),
         "balances": balances,
-        "api_validated": state.api_validated
+        "api_validated": state.api_validated,
+        "engine_status": _resolved_engine_status(),
     }
 
 
@@ -1531,6 +1563,7 @@ async def get_system():
         "environment": state.environment,
         "mode": state.mode,
         "connection_status": state.connection_status,
+        "engine_status": _resolved_engine_status(),
         "api_validated": state.api_validated,
         "timestamp_offset_ms": state.timestamp_offset_ms,
         "last_time_sync": state.last_time_sync.isoformat() if state.last_time_sync else None,
@@ -1541,7 +1574,8 @@ async def get_system():
         "uptime_seconds": uptime,
         "started_at": state.start_time.isoformat(),
         "ws_clients": len(manager.active_connections),
-        "incident_state": "NORMAL"  # v1.0.0: Incident state tracking
+        "incident_state": state.incident_state,
+        "trading_paused": state.trading_paused,
     }
     return wrap_legacy_response(system_data)
 
@@ -1631,8 +1665,16 @@ async def toggle_kill_switch(active: bool = True, reason: str = "Manual activati
 
     # Stop/start trading loop based on kill switch
     if active:
+        if _resolved_engine_status() != "stopped":
+            _set_engine_status("paused")
         await stop_real_trading_loop()
-    else:
+    elif (
+        _resolved_engine_status() != "stopped"
+        and not state.trading_paused
+        and state.incident_state == "NORMAL"
+        and state.exchange_client is not None
+        and state.api_validated
+    ):
         await start_real_trading_loop()
 
     logger.warning(f"Kill switch {'ACTIVATED' if active else 'DEACTIVATED'}: {reason}")
@@ -1640,7 +1682,8 @@ async def toggle_kill_switch(active: bool = True, reason: str = "Manual activati
     return {
         "success": True,
         "kill_switch_active": state.kill_switch_active,
-        "reason": state.kill_switch_reason
+        "reason": state.kill_switch_reason,
+        "engine_status": _resolved_engine_status(),
     }
 
 
@@ -1783,10 +1826,12 @@ async def get_live_prices():
 async def get_status():
     """Get current bot status."""
     uptime = (datetime.now() - state.start_time).total_seconds()
+    engine_status = _resolved_engine_status()
 
     return {
         "session_id": state.session_id,
-        "status": "running",
+        "status": engine_status,
+        "engine_status": engine_status,
         "mode": state.mode,
         "capital": state.initial_capital,
         "current_capital": state.capital,
@@ -1802,6 +1847,10 @@ async def get_status():
         "current_price": state.current_price,
         "connected_clients": len(manager.active_connections),
         "api_validated": state.api_validated,
+        "connection_status": state.connection_status,
+        "kill_switch_active": state.kill_switch_active,
+        "trading_paused": state.trading_paused,
+        "incident_state": state.incident_state,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -2996,9 +3045,17 @@ async def v4_binance_ticker(symbol: str = "BTC/USDT"):
 @app.post("/api/engine/start")
 async def start_engine(config: EngineConfig):
     """Start/reset the trading engine."""
-    state.mode = config.mode
-    state.initial_capital = config.capital
-    state.capital = config.capital
+    mode = config.mode.lower()
+    if mode not in ("testnet", "live"):
+        raise HTTPException(status_code=400, detail="Invalid mode. Must be: testnet or live")
+
+    if state.exchange_client is None or not state.api_validated:
+        raise HTTPException(status_code=409, detail="Connect and validate an exchange session before starting the engine")
+
+    if state.mode != mode:
+        raise HTTPException(status_code=409, detail=f"Active session is {state.mode}; switch the session before starting {mode}")
+
+    state.mode = mode
     state.pnl = 0.0
     state.position = 0.0
     state.trades = []
@@ -3006,19 +3063,25 @@ async def start_engine(config: EngineConfig):
     state.winning_trades = 0
     state.losing_trades = 0
     state.start_time = datetime.now()
+    state.trading_paused = False
+    state.trading_pause_reason = None
+
+    await start_real_trading_loop()
 
     await manager.broadcast({
         "type": "engine_status",
-        "status": "started",
-        "mode": config.mode
+        "status": _resolved_engine_status(),
+        "mode": state.mode
     })
 
-    return {"status": "started", "mode": config.mode}
+    return {"status": _resolved_engine_status(), "mode": state.mode}
 
 
 @app.post("/api/engine/stop")
 async def stop_engine():
     """Stop the trading engine."""
+    _set_engine_status("stopped")
+    await stop_real_trading_loop()
     await manager.broadcast({
         "type": "engine_status",
         "status": "stopped"
@@ -3088,6 +3151,9 @@ async def pause_trading(request: OperatorActionRequest):
         "previous_state": "active"
     }
     state.operator_action_log.append(action_log)
+    if _resolved_engine_status() != "stopped":
+        _set_engine_status("paused")
+    await stop_real_trading_loop()
 
     await manager.broadcast({
         "type": "operator_action",
@@ -3134,6 +3200,14 @@ async def resume_trading(request: OperatorActionRequest):
         "previous_state": "paused"
     }
     state.operator_action_log.append(action_log)
+    if (
+        _resolved_engine_status() != "stopped"
+        and not state.kill_switch_active
+        and state.incident_state == "NORMAL"
+        and state.exchange_client is not None
+        and state.api_validated
+    ):
+        await start_real_trading_loop()
 
     await manager.broadcast({
         "type": "operator_action",
@@ -3183,6 +3257,14 @@ async def acknowledge_incident(request: OperatorActionRequest):
         "previous_incident_reason": previous_reason
     }
     state.operator_action_log.append(action_log)
+    if (
+        _resolved_engine_status() != "stopped"
+        and not state.trading_paused
+        and not state.kill_switch_active
+        and state.exchange_client is not None
+        and state.api_validated
+    ):
+        await start_real_trading_loop()
 
     await manager.broadcast({
         "type": "incident_acknowledged",
@@ -3243,19 +3325,29 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=ROOT_WS_HEARTBEAT_SECONDS)
+                message = json.loads(data)
 
-            if message.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
-            elif message.get("type") == "refresh":
+                if message.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                elif message.get("type") == "refresh":
+                    await websocket.send_json({
+                        "type": "update",
+                        "status": await get_status(),
+                        "portfolio": await get_portfolio()
+                    })
+            except asyncio.TimeoutError:
                 await websocket.send_json({
-                    "type": "update",
+                    "type": "heartbeat",
                     "status": await get_status(),
-                    "portfolio": await get_portfolio()
+                    "portfolio": await get_portfolio(),
+                    "timestamp": datetime.now().isoformat(),
                 })
 
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    finally:
         manager.disconnect(websocket)
 
 
@@ -3415,15 +3507,24 @@ async def real_trading_loop():
 
     while True:
         try:
+            if state.engine_status == "stopped":
+                await asyncio.sleep(LOOP_INTERVAL)
+                continue
+
             # Only run if exchange client is connected
             if state.exchange_client is None or not state.api_validated:
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
 
-            if state.kill_switch_active:
-                logger.info("Kill switch active — trading loop paused")
+            if state.kill_switch_active or state.trading_paused or state.incident_state != "NORMAL":
+                if state.engine_status != "paused":
+                    _set_engine_status("paused")
+                logger.info("Trading loop paused by control state")
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
+
+            if state.engine_status != "running":
+                _set_engine_status("running")
 
             if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
                 await asyncio.sleep(LOOP_INTERVAL)
@@ -3535,9 +3636,14 @@ async def real_trading_loop():
 async def start_real_trading_loop():
     """Start the real trading loop task. Called when exchange client is connected."""
     global _trading_loop_task
+    if state.exchange_client is None or not state.api_validated:
+        logger.warning("Cannot start trading loop without a validated exchange connection")
+        _set_engine_status("stopped")
+        return
     if _trading_loop_task is None or _trading_loop_task.done():
         _trading_loop_task = asyncio.create_task(real_trading_loop())
         logger.info("Real trading loop task started")
+    _set_engine_status("running")
 
 
 async def stop_real_trading_loop():
@@ -3570,6 +3676,18 @@ async def startup():
         logger.warning("Market data service not available — install dependencies")
 
     logger.info("CryptoBoss API ready — no simulator running")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Stop background services cleanly."""
+    await stop_real_trading_loop()
+    if MARKET_DATA_AVAILABLE:
+        try:
+            service = get_market_data_service()
+            await service.stop()
+        except Exception as e:
+            logger.warning(f"Market data service shutdown warning: {e}")
 
 
 # Mount static files
