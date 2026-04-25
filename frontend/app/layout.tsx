@@ -2,42 +2,158 @@
 
 import './globals.css';
 import { Inter } from 'next/font/google';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 import { SessionProvider, useSession, TradingMode } from '../contexts/SessionContext';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { ApiKeyModal } from '../components/ApiKeyModal';
+import { unwrapApiData } from '@/lib/api';
 
 const inter = Inter({ subsets: ['latin'] });
 
 // Exchange health stages per spec
 type ExchangeHealthStage = 'NORMAL' | 'DEGRADED' | 'CLOSE_ONLY' | 'HALTED';
 type SystemStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
+type EngineStatus = 'running' | 'paused' | 'stopped';
+type ApiConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
     const { state, switchMode, resetSession } = useSession();
-    const { user, activeAccount, isAuthenticated, logout } = useAuth();
+    const { token } = useAuth();
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [systemStatus, setSystemStatus] = useState<SystemStatus>('healthy');
+    const [systemStatus, setSystemStatus] = useState<SystemStatus>('unknown');
     const [exchangeHealth, setExchangeHealth] = useState<ExchangeHealthStage>('NORMAL');
     const [lastDecisionTime, setLastDecisionTime] = useState<string | null>(null);
     const [killSwitchStep, setKillSwitchStep] = useState(0);
     const [showApiModal, setShowApiModal] = useState(false);
     const [targetMode, setTargetMode] = useState<TradingMode>('testnet');
     const [mounted, setMounted] = useState(false);
+    const [engineStatus, setEngineStatus] = useState<EngineStatus>('stopped');
+    const [connectionStatus, setConnectionStatus] = useState<ApiConnectionStatus>('disconnected');
+    const [backendMode, setBackendMode] = useState<TradingMode>('testnet');
 
     useEffect(() => {
         setMounted(true);
     }, []);
 
-    const handleKillSwitch = () => {
-        console.log('KILL SWITCH ACTIVATED');
-        setSystemStatus('critical');
-        setExchangeHealth('HALTED');
-        setKillSwitchStep(2);
-        setTimeout(() => setKillSwitchStep(0), 5000);
+    const deriveSystemStatus = useCallback((system: any): SystemStatus => {
+        if (system.kill_switch?.active || ['INCIDENT_FREEZE', 'HALTED'].includes(system.incident_state)) {
+            return 'critical';
+        }
+        if (system.connection_status === 'error') {
+            return 'critical';
+        }
+        if (system.engine_status === 'running' && system.connection_status === 'connected') {
+            return 'healthy';
+        }
+        if (
+            system.engine_status === 'paused' ||
+            system.connection_status === 'connecting' ||
+            system.connection_status === 'connected' ||
+            system.api_validated
+        ) {
+            return 'warning';
+        }
+        return 'unknown';
+    }, []);
+
+    const deriveExchangeHealth = useCallback((system: any): ExchangeHealthStage => {
+        if (system.kill_switch?.active || ['INCIDENT_FREEZE', 'HALTED'].includes(system.incident_state)) {
+            return 'HALTED';
+        }
+        if (system.trading_paused) {
+            return 'CLOSE_ONLY';
+        }
+        if (system.connection_status === 'connected') {
+            return 'NORMAL';
+        }
+        if (system.connection_status === 'connecting' || system.api_validated) {
+            return 'DEGRADED';
+        }
+        return 'DEGRADED';
+    }, []);
+
+    const refreshRuntime = useCallback(async () => {
+        try {
+            const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+            const [systemResponse, decisionsResponse] = await Promise.all([
+                fetch(`${API_URL}/api/system`, { headers, cache: 'no-store' }),
+                fetch(`${API_URL}/api/v11/decisions?limit=1`, { headers, cache: 'no-store' }),
+            ]);
+
+            if (systemResponse.ok) {
+                const payload = await systemResponse.json();
+                const system: any = unwrapApiData(payload);
+                setEngineStatus((system.engine_status || 'stopped') as EngineStatus);
+                setConnectionStatus((system.connection_status || 'disconnected') as ApiConnectionStatus);
+                setBackendMode(system.mode === 'live' ? 'live' : 'testnet');
+                setSystemStatus(deriveSystemStatus(system));
+                setExchangeHealth(deriveExchangeHealth(system));
+            } else {
+                setSystemStatus('unknown');
+                setExchangeHealth('DEGRADED');
+                setEngineStatus('stopped');
+                setConnectionStatus('error');
+            }
+
+            if (decisionsResponse.ok) {
+                const payload = await decisionsResponse.json();
+                const data: any = unwrapApiData(payload);
+                const decisions = Array.isArray(data) ? data : (data.decisions || []);
+                const latest = decisions[0];
+                setLastDecisionTime(
+                    latest?.timestamp
+                        ? new Date(latest.timestamp).toLocaleTimeString('en-GB', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                        })
+                        : null,
+                );
+            }
+        } catch (error) {
+            console.error('Failed to refresh runtime state:', error);
+            setSystemStatus('unknown');
+            setExchangeHealth('DEGRADED');
+            setEngineStatus('stopped');
+            setConnectionStatus('error');
+        }
+    }, [deriveExchangeHealth, deriveSystemStatus, token]);
+
+    useEffect(() => {
+        if (!mounted) {
+            return;
+        }
+        refreshRuntime();
+        const interval = setInterval(refreshRuntime, 5000);
+        return () => clearInterval(interval);
+    }, [mounted, refreshRuntime]);
+
+    useEffect(() => {
+        const handleAccountSwitched = () => {
+            refreshRuntime();
+        };
+        window.addEventListener('accountSwitched', handleAccountSwitched);
+        return () => window.removeEventListener('accountSwitched', handleAccountSwitched);
+    }, [refreshRuntime]);
+
+    const handleKillSwitch = async () => {
+        try {
+            setKillSwitchStep(1);
+            await fetch(`${API_URL}/api/kill-switch?active=true&reason=Manual%20activation%20from%20topbar`, {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
+            setKillSwitchStep(2);
+            await refreshRuntime();
+        } catch (error) {
+            console.error('Failed to activate kill switch:', error);
+        } finally {
+            setTimeout(() => setKillSwitchStep(0), 5000);
+        }
     };
 
     const handleModeChange = (newMode: TradingMode) => {
@@ -50,6 +166,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
         const success = await switchMode(targetMode, config);
         if (success) {
             setShowApiModal(false);
+            await refreshRuntime();
         }
         return success;
     };
@@ -121,15 +238,17 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
             <Sidebar
                 collapsed={sidebarCollapsed}
                 onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+                engineStatus={engineStatus}
+                connectionStatus={connectionStatus}
             />
 
             <Topbar
                 sidebarCollapsed={sidebarCollapsed}
                 systemStatus={systemStatus}
-                tradingMode={state.mode === 'live' ? 'live' : 'testnet'}
+                tradingMode={backendMode}
                 lastDecision={lastDecisionTime}
                 onKillSwitch={handleKillSwitch}
-                onModeToggle={() => handleModeChange(state.mode === 'live' ? 'testnet' : 'live')}
+                onModeToggle={() => handleModeChange(backendMode === 'live' ? 'testnet' : 'live')}
             />
 
             {/* Main Content */}

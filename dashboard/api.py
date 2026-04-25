@@ -372,6 +372,17 @@ class ValidateKeysRequest(BaseModel):
     testnet: bool = True
 
 
+class RiskSettingsUpdateRequest(BaseModel):
+    daily_loss_limit: float
+    weekly_loss_limit: float
+    max_drawdown: float
+    max_positions: int
+    max_exposure: float
+    trades_per_day: int
+    trades_per_context: int
+    losses_per_bias: int
+
+
 # Global state with proper initialization
 class DashboardState:
     def __init__(self):
@@ -507,6 +518,73 @@ class DashboardState:
 state = DashboardState()
 
 ROOT_WS_HEARTBEAT_SECONDS = 3.0
+RISK_SETTINGS_FILE = Path(__file__).parent.parent / "data" / "dashboard_risk_settings.json"
+DEFAULT_RISK_SETTINGS = {
+    "daily_loss_limit": 500.0,
+    "weekly_loss_limit": 1500.0,
+    "max_drawdown": 10.0,
+    "max_positions": 5,
+    "max_exposure": 10000.0,
+    "trades_per_day": 10,
+    "trades_per_context": 3,
+    "losses_per_bias": 2,
+}
+
+
+def _load_risk_settings() -> Dict[str, Any]:
+    """Load editable dashboard risk settings from disk."""
+    if not RISK_SETTINGS_FILE.exists():
+        return DEFAULT_RISK_SETTINGS.copy()
+
+    try:
+        raw = json.loads(RISK_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(f"Failed to load risk settings, using defaults: {exc}")
+        return DEFAULT_RISK_SETTINGS.copy()
+
+    settings = DEFAULT_RISK_SETTINGS.copy()
+    if isinstance(raw, dict):
+        settings.update({key: raw[key] for key in raw.keys() & settings.keys()})
+    return settings
+
+
+def _save_risk_settings() -> None:
+    """Persist editable dashboard risk settings to disk."""
+    RISK_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RISK_SETTINGS_FILE.write_text(
+        json.dumps(risk_settings, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _capital_reference() -> float:
+    """Capital reference used to derive percent-based limits."""
+    return float(state.initial_capital or state.capital or risk_settings.get("max_exposure") or 10000.0)
+
+
+def _risk_limits_snapshot() -> Dict[str, Any]:
+    """Return a normalized view of dashboard risk limits."""
+    capital_reference = max(_capital_reference(), 1.0)
+    daily_loss_limit = float(risk_settings["daily_loss_limit"])
+    weekly_loss_limit = float(risk_settings["weekly_loss_limit"])
+    max_exposure = float(risk_settings["max_exposure"])
+
+    return {
+        "daily_loss_limit": daily_loss_limit,
+        "daily_loss_limit_pct": round((daily_loss_limit / capital_reference) * 100, 2),
+        "weekly_loss_limit": weekly_loss_limit,
+        "max_drawdown": float(risk_settings["max_drawdown"]),
+        "max_positions": int(risk_settings["max_positions"]),
+        "max_exposure": max_exposure,
+        "max_position_pct": round((max_exposure / capital_reference) * 100, 2),
+        "max_trades_per_day": int(risk_settings["trades_per_day"]),
+        "trades_per_day": int(risk_settings["trades_per_day"]),
+        "trades_per_context": int(risk_settings["trades_per_context"]),
+        "losses_per_bias": int(risk_settings["losses_per_bias"]),
+    }
+
+
+risk_settings = _load_risk_settings()
 
 
 def _set_engine_status(status: str) -> None:
@@ -525,6 +603,90 @@ def _resolved_engine_status() -> str:
     if state.api_validated and state.exchange_client is not None:
         return state.engine_status
     return "stopped"
+
+
+async def _attach_exchange_client_for_account(user_id: str, account: ExchangeAccount) -> Dict[str, Any]:
+    """
+    Rehydrate the selected account into the dashboard runtime.
+
+    Selecting an account must reconnect the exchange client so the dashboard
+    engine state, balances, and controls reflect the active account.
+    """
+    if not BINANCE_AVAILABLE:
+        raise HTTPException(status_code=500, detail="Exchange client not available")
+
+    account_service = get_account_service()
+    keys = account_service.get_decrypted_keys(user_id, account.exchange_account_id)
+    if not keys:
+        raise HTTPException(status_code=500, detail="Unable to load exchange credentials for the selected account")
+
+    api_key, api_secret = keys
+    client = BinanceClient(
+        api_key=api_key,
+        api_secret=api_secret,
+        testnet=account.environment.upper() == "TESTNET",
+    )
+
+    try:
+        validation = await client.validate_credentials()
+    except Exception as exc:
+        try:
+            await client.destroy()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Exchange validation failed: {exc}") from exc
+
+    if not validation.get("success"):
+        try:
+            await client.destroy()
+        except Exception:
+            pass
+        raise HTTPException(status_code=401, detail=validation.get("message", "Exchange credentials are invalid"))
+
+    balances = validation.get("balances", {}) if isinstance(validation, dict) else {}
+    usdt_balance = balances.get("USDT", balances.get("usdt", 0)) if isinstance(balances, dict) else 0
+    if isinstance(usdt_balance, dict):
+        usdt_balance = usdt_balance.get("free", usdt_balance.get("total", 0))
+
+    state.exchange_client = client
+    state.api_validated = True
+    state.connection_status = "connected"
+    state.last_time_sync = datetime.now()
+    state.timestamp_offset_ms = 0
+    state.initial_capital = float(usdt_balance or 0)
+    state.capital = float(usdt_balance or 0)
+    state.environment = account.environment.lower()
+    state.mode = account.environment.lower()
+
+    return balances
+
+
+def _lookup_persisted_active_account_id(user_id: str) -> Optional[str]:
+    """Read the last active exchange account from persistent storage when available."""
+    try:
+        from src.core.database.repository import get_repository
+
+        repo = get_repository()
+        return repo.get_active_account_id(user_id)
+    except Exception as exc:
+        logger.warning(f"Unable to restore persisted active account: {exc}")
+        return None
+
+
+async def _restore_active_account_runtime(user: User, account: ExchangeAccount) -> Dict[str, Any]:
+    """
+    Rebuild the dashboard runtime for an already-selected account.
+
+    This is used after backend restarts so the active account, exchange client,
+    balances, and trading loop come back without forcing the user to reselect.
+    """
+    await stop_real_trading_loop()
+    state.reset(account.environment.lower())
+    state.active_exchange_account_id = account.exchange_account_id
+    state.active_user_id = user.user_id
+    balances = await _attach_exchange_client_for_account(user.user_id, account)
+    await start_real_trading_loop()
+    return balances
 
 
 # === v12 Runtime Objects & Helpers ===
@@ -1086,6 +1248,7 @@ async def switch_session(request: SessionSwitchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     # Reset state for new session before attaching the validated exchange client.
+    await stop_real_trading_loop()
     state.reset(mode)
     state.exchange_client = client
     state.api_validated = True
@@ -1337,9 +1500,12 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
         logger.info(f"✅ Bot instance switched - {'NEW' if is_new_account else 'existing'} account")
 
     # Legacy: Also reset dashboard state
+    await stop_real_trading_loop()
     state.reset(result.account.environment.lower())
     state.active_exchange_account_id = result.account.exchange_account_id
     state.active_user_id = user.user_id
+    balances = await _attach_exchange_client_for_account(user.user_id, result.account)
+    await start_real_trading_loop()
 
     # Legacy: Switch scoped state manager
     if SCOPED_STATE_AVAILABLE:
@@ -1390,6 +1556,9 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
         "account": result.account.to_dict(),
         "instance_switched": bot_instance is not None,
         "is_new_account": is_new_account,
+        "balances": balances,
+        "engine_status": _resolved_engine_status(),
+        "connection_status": state.connection_status,
         "dashboard_data": dashboard_data,
         "message": f"Bot instance switched - {'empty state' if is_new_account else 'loaded existing state'}"
     })
@@ -1424,15 +1593,20 @@ async def get_active_account(user: User = Depends(require_auth)):
     """
     Get the currently active exchange account.
     """
-    if not hasattr(state, 'active_exchange_account_id') or not state.active_exchange_account_id:
+    active_account_id = getattr(state, "active_exchange_account_id", None) or _lookup_persisted_active_account_id(user.user_id)
+
+    if not active_account_id:
         return wrap_response({
             "active": False,
             "account": None,
             "message": "No account selected"
         })
 
+    state.active_exchange_account_id = active_account_id
+    state.active_user_id = user.user_id
+
     account_service = get_account_service()
-    result = account_service.get_account(user.user_id, state.active_exchange_account_id)
+    result = account_service.get_account(user.user_id, active_account_id)
 
     if not result.success:
         return wrap_response({
@@ -1441,15 +1615,41 @@ async def get_active_account(user: User = Depends(require_auth)):
             "message": "Account not found"
         })
 
+    runtime_restored = False
+    runtime_error = None
+    should_restore_runtime = (
+        state.exchange_client is None
+        or not state.api_validated
+        or state.connection_status != "connected"
+    )
+    if should_restore_runtime:
+        try:
+            await _restore_active_account_runtime(user, result.account)
+            runtime_restored = True
+        except HTTPException as exc:
+            runtime_error = str(exc.detail)
+            state.connection_status = "error"
+            _set_engine_status("stopped")
+            logger.warning(f"Failed to restore runtime for active account {active_account_id[:8]}...: {exc.detail}")
+        except Exception as exc:
+            runtime_error = str(exc)
+            state.connection_status = "error"
+            _set_engine_status("stopped")
+            logger.warning(f"Unexpected runtime restore failure for {active_account_id[:8]}...: {exc}")
+
     # Get key fingerprint for display
-    fingerprint = account_service.get_key_fingerprint(user.user_id, state.active_exchange_account_id)
+    fingerprint = account_service.get_key_fingerprint(user.user_id, active_account_id)
 
     account_data = result.account.to_dict()
     account_data["api_key_fingerprint"] = fingerprint
 
     return wrap_response({
         "active": True,
-        "account": account_data
+        "account": account_data,
+        "runtime_restored": runtime_restored,
+        "runtime_error": runtime_error,
+        "engine_status": _resolved_engine_status(),
+        "connection_status": state.connection_status,
     })
 
 
@@ -1623,7 +1823,10 @@ async def get_risk():
     Shows drawdown, allocation, and remaining risk budget.
     CryptoBoss 1.0.0: All values tagged with data source.
     """
-    drawdown_pct = (state.pnl / state.initial_capital * 100) if state.initial_capital > 0 else 0
+    capital_reference = _capital_reference()
+    drawdown_pct = (state.pnl / capital_reference * 100) if capital_reference > 0 else 0
+    limits = _risk_limits_snapshot()
+    trades_remaining = max(limits["max_trades_per_day"] - state.total_trades, 0)
 
     risk_data = {
         "daily_pnl": state.pnl,
@@ -1635,14 +1838,12 @@ async def get_risk():
             "current": state.capital,
             "allocated": state.position * state.current_price
         },
-        "limits": {
-            "daily_loss_limit_pct": 5.0,
-            "max_position_pct": 25.0,
-            "max_trades_per_day": 10
-        },
+        "limits": limits,
         "remaining_budget": {
-            "daily_loss_available_pct": 5.0 + drawdown_pct,
-            "trades_remaining": 10 - state.total_trades
+            "daily_loss_available_pct": max(limits["daily_loss_limit_pct"] + drawdown_pct, 0),
+            "trades_remaining": trades_remaining,
+            "trades_today": state.total_trades,
+            "context_trades": 0,
         },
         "kill_switch_active": state.kill_switch_active,
         "risk_guardian_active": True,
@@ -1656,6 +1857,12 @@ async def toggle_kill_switch(active: bool = True, reason: str = "Manual activati
     """Toggle the kill switch."""
     state.kill_switch_active = active
     state.kill_switch_reason = reason if active else None
+    state.operator_action_log.append({
+        "action": "KILL_SWITCH_ON" if active else "KILL_SWITCH_OFF",
+        "reason": reason,
+        "timestamp": datetime.now().isoformat(),
+        "operator": "dashboard_user",
+    })
 
     await manager.broadcast({
         "type": "kill_switch",
@@ -2055,6 +2262,7 @@ def _risk_state_snapshot() -> Dict[str, Any]:
         }
         for action in state.operator_action_log[-20:]
     ]
+    limits = _risk_limits_snapshot()
     return {
         "market_context": {
             "state": state.market_context,
@@ -2083,9 +2291,9 @@ def _risk_state_snapshot() -> Dict[str, Any]:
             "context_trades": 0,
         },
         "limits": {
-            "daily_loss_limit": 500,
-            "weekly_loss_limit": 1500,
-            "max_trades_per_day": 10,
+            "daily_loss_limit": limits["daily_loss_limit"],
+            "weekly_loss_limit": limits["weekly_loss_limit"],
+            "max_trades_per_day": limits["max_trades_per_day"],
         },
     }
 
@@ -2136,22 +2344,57 @@ async def get_drift_state():
 @app.get("/api/settings")
 async def get_settings():
     """Settings endpoint consumed by the Next.js settings page."""
+    limits = _risk_limits_snapshot()
     return wrap_legacy_response({
         "trading_mode": state.mode,
         "exchange": "Binance",
         "api_connected": state.connection_status == "connected",
         "latency_ms": abs(state.timestamp_offset_ms) if state.timestamp_offset_ms else None,
         "testnet": state.environment != "live",
+        "engine_status": _resolved_engine_status(),
+        "connection_status": state.connection_status,
         "risk": {
-            "daily_loss_limit": 500,
-            "weekly_loss_limit": 1500,
-            "max_drawdown": 10,
-            "max_positions": 5,
-            "max_exposure": state.initial_capital or 10000,
-            "trades_per_day": 10,
-            "trades_per_context": 3,
-            "losses_per_bias": 2,
+            "daily_loss_limit": limits["daily_loss_limit"],
+            "weekly_loss_limit": limits["weekly_loss_limit"],
+            "max_drawdown": limits["max_drawdown"],
+            "max_positions": limits["max_positions"],
+            "max_exposure": limits["max_exposure"],
+            "trades_per_day": limits["trades_per_day"],
+            "trades_per_context": limits["trades_per_context"],
+            "losses_per_bias": limits["losses_per_bias"],
         },
+    })
+
+
+@app.put("/api/settings/risk")
+async def update_risk_settings(request: RiskSettingsUpdateRequest):
+    """Persist editable dashboard risk settings."""
+    if request.daily_loss_limit <= 0 or request.weekly_loss_limit <= 0:
+        raise HTTPException(status_code=400, detail="Loss limits must be greater than zero")
+    if request.max_drawdown <= 0 or request.max_drawdown > 100:
+        raise HTTPException(status_code=400, detail="Max drawdown must be between 0 and 100")
+    if request.max_positions <= 0 or request.trades_per_day <= 0 or request.trades_per_context <= 0:
+        raise HTTPException(status_code=400, detail="Position and trade limits must be positive integers")
+    if request.losses_per_bias <= 0 or request.max_exposure <= 0:
+        raise HTTPException(status_code=400, detail="Exposure and loss limits must be greater than zero")
+
+    risk_settings.update(request.dict())
+    _save_risk_settings()
+
+    action_log = {
+        "action": "UPDATE_RISK_SETTINGS",
+        "reason": (
+            f"Daily {request.daily_loss_limit:.2f}, weekly {request.weekly_loss_limit:.2f}, "
+            f"trades/day {request.trades_per_day}"
+        ),
+        "timestamp": datetime.now().isoformat(),
+        "operator": "dashboard_user",
+    }
+    state.operator_action_log.append(action_log)
+
+    return wrap_legacy_response({
+        "success": True,
+        "risk": _risk_limits_snapshot(),
     })
 
 

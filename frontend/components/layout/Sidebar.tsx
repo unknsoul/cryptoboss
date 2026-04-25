@@ -60,14 +60,39 @@ const iconMap: Record<string, JSX.Element> = {
 interface SidebarProps {
     collapsed: boolean;
     onToggle: () => void;
+    engineStatus?: 'running' | 'paused' | 'stopped';
+    connectionStatus?: 'connected' | 'connecting' | 'disconnected' | 'error';
 }
 
-export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export function Sidebar({
+    collapsed,
+    onToggle,
+    engineStatus = 'stopped',
+    connectionStatus = 'disconnected',
+}: SidebarProps) {
     const pathname = usePathname();
 
     // Split into regular and operator nav items
     const regularNav = navigation.filter(item => !item.isOperator);
     const operatorNav = navigation.filter(item => item.isOperator);
+
+    const engineDotClass =
+        engineStatus === 'running'
+            ? 'bg-[#4a9268]'
+            : engineStatus === 'paused'
+                ? 'bg-[#c9a227]'
+                : connectionStatus === 'connected'
+                    ? 'bg-[#c9a227]'
+                    : 'bg-[#a65454]';
+
+    const engineLabel =
+        engineStatus === 'running'
+            ? 'Running'
+            : engineStatus === 'paused'
+                ? 'Paused'
+                : connectionStatus === 'connected'
+                    ? 'Connected'
+                    : 'Stopped';
 
     return (
         <aside
@@ -168,19 +193,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-[#6b7280]">Engine</span>
                             <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#4a9268]" />
-                                <span className="text-[#8b98a5]">Active</span>
+                                <span className={`w-1.5 h-1.5 rounded-full ${engineDotClass}`} />
+                                <span className="text-[#8b98a5]">{engineLabel}</span>
                             </div>
                         </div>
                     </div>
                 ) : (
                     <div className="flex justify-center">
-                        <span className="w-2 h-2 rounded-full bg-[#4a9268]" title="Engine Active" />
+                        <span className={`w-2 h-2 rounded-full ${engineDotClass}`} title={`Engine ${engineLabel}`} />
                     </div>
                 )}
             </div>
         </aside>
     );
 }
-
 
