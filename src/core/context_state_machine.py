@@ -214,6 +214,10 @@ class ContextStateMachine:
         valid_targets = VALID_TRANSITIONS.get(self._current_state, [])
         if target_state not in valid_targets:
             return False, f"Invalid transition: {self._current_state.value} -> {target_state.value}"
+
+        # Check max transitions before time-based gates so hard limits win
+        if self.get_transitions_24h() >= self.max_transitions_per_24h:
+            return False, f"Max transitions ({self.max_transitions_per_24h}/24h) reached"
         
         # Check minimum state duration
         if self.time_in_state < self.min_state_duration:
@@ -224,10 +228,6 @@ class ContextStateMachine:
         if self.is_locked:
             remaining = self.lock_expires - now
             return False, f"Transition cooldown: {remaining.total_seconds():.0f}s remaining"
-        
-        # Check max transitions
-        if self.get_transitions_24h() >= self.max_transitions_per_24h:
-            return False, f"Max transitions ({self.max_transitions_per_24h}/24h) reached"
         
         return True, "Transition allowed"
     

@@ -1,39 +1,35 @@
-
 import numpy as np
-from core.indicators import TechnicalIndicators
-
 import pandas as pd
 
-def test_indicators():
-    print("Loading real data...")
-    df = pd.read_csv("data/btc_1h.csv")
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    
-    print(f"Data types: {highs.dtype}, {closes.dtype}")
-    
-    print("Testing EMA...")
-    ema = TechnicalIndicators.ema(closes, 12)
-    print(f"EMA type: {type(ema)}, shape: {ema.shape}")
-    
-    print("Testing MACD...")
-    m, s, h = TechnicalIndicators.macd(closes, 12, 26, 9)
-    print(f"MACD types: {type(m)}, {type(s)}, {type(h)}")
-    
-    print("Testing ATR...")
-    atr = TechnicalIndicators.atr(highs, lows, closes, 14)
-    print(f"ATR type: {type(atr)}")
-    
-    print("Testing RSI...")
-    rsi = TechnicalIndicators.rsi(closes, 14)
-    print(f"RSI type: {type(rsi)}")
+from src.analysis.indicators import IndicatorEngine
 
-if __name__ == "__main__":
-    try:
-        test_indicators()
-        print("All indicators OK")
-    except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+
+def test_indicator_engine_computes_core_columns():
+    periods = 300
+    close = np.linspace(60000, 63000, periods) + np.sin(np.linspace(0, 12, periods)) * 400
+    df = pd.DataFrame(
+        {
+            "open": close - 25,
+            "high": close + 125,
+            "low": close - 125,
+            "close": close,
+            "volume": np.linspace(100, 500, periods),
+        }
+    )
+
+    enriched = IndicatorEngine().compute_all(df)
+
+    expected_columns = [
+        "EMA_20",
+        "EMA_50",
+        "EMA_200",
+        "RSI_14",
+        "MACD",
+        "ATR_14",
+        "VWAP",
+        "OBV",
+    ]
+
+    for column in expected_columns:
+        assert column in enriched.columns
+        assert pd.notna(enriched.iloc[-1][column])

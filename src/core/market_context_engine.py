@@ -256,9 +256,26 @@ class MarketContextEngine:
         
         # Get current ATR vs historical
         current_atr = atr.iloc[-1]
-        historical_atr = atr.tail(100)
-        
-        percentile = (historical_atr < current_atr).mean() * 100
+        if pd.isna(current_atr):
+            return 50.0, 'normal'
+
+        historical_atr = atr.dropna().tail(100)
+        if historical_atr.empty:
+            return 50.0, 'normal'
+
+        less_than = (historical_atr < current_atr).mean()
+        less_or_equal = (historical_atr <= current_atr).mean()
+        percentile = ((less_than + less_or_equal) / 2) * 100
+
+        current_close = max(float(df['close'].iloc[-1]), 1e-9)
+        atr_pct_of_price = (float(current_atr) / current_close) * 100
+
+        # Absolute intrabar range catches uniformly-volatile datasets that
+        # percentile-only ranking can miss.
+        if atr_pct_of_price >= 10.0:
+            return max(percentile, self.extreme_vol_percentile), 'extreme'
+        if atr_pct_of_price >= 5.0:
+            return max(percentile, self.high_vol_percentile), 'high'
         
         # Classify regime
         if percentile >= self.extreme_vol_percentile:
