@@ -12,6 +12,7 @@ Critical for debugging and confidence in live trading.
 
 import json
 import logging
+import re
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -140,6 +141,12 @@ class DeterministicReplayEngine:
     def current_session(self) -> Optional[str]:
         """Get current session ID."""
         return self._current_session_id
+
+    @staticmethod
+    def _sanitize_session_component(value: str) -> str:
+        """Make symbols safe to use inside filenames and session IDs."""
+        sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
+        return sanitized or "session"
     
     def start_recording(self, symbol: str) -> str:
         """
@@ -151,7 +158,9 @@ class DeterministicReplayEngine:
             logger.warning("Already recording, stopping current session")
             self.stop_recording()
         
-        self._current_session_id = f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        symbol_slug = self._sanitize_session_component(symbol)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+        self._current_session_id = f"{symbol_slug}_{timestamp}"
         self._current_symbol = symbol
         self._events = []
         self._decisions = []

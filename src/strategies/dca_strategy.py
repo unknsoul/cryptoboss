@@ -363,7 +363,16 @@ class DCAStrategy:
         if not self.closed_deals:
             return {
                 'total_deals': 0,
-                'active_deal': self.active_deal is not None
+                'profitable_deals': 0,
+                'losing_deals': 0,
+                'win_rate_pct': 0.0,
+                'total_pnl': 0.0,
+                'avg_pnl_pct': 0.0,
+                'avg_win_pct': 0.0,
+                'avg_loss_pct': 0.0,
+                'avg_safety_orders_used': 0.0,
+                'active_deal': self.active_deal is not None,
+                'max_capital_required': self.calculate_total_investment()
             }
         
         total_pnl = sum(d.realized_pnl for d in self.closed_deals)

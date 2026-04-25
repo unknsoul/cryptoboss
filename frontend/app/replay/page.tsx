@@ -11,6 +11,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -63,7 +64,8 @@ export default function ReplayAnalysisPage() {
             );
 
             if (res.ok) {
-                const data = await res.json();
+                const payload = await res.json();
+                const data: any = unwrapApiData(payload);
                 setSessions(data.sessions || []);
             }
         } catch (error) {
@@ -94,7 +96,8 @@ export default function ReplayAnalysisPage() {
             );
 
             if (res.ok) {
-                const data = await res.json();
+                const payload = await res.json();
+                const data: any = unwrapApiData(payload);
                 setDecisions(data.decisions || []);
             }
         } catch (error) {

@@ -126,8 +126,10 @@ class TradingEngine:
             exec_mode = ExecutionMode.LIVE
         elif mode == "testnet":
             exec_mode = ExecutionMode.TESTNET
-        else:
+        elif mode == "paper":
             exec_mode = ExecutionMode.PAPER
+        else:
+            exec_mode = ExecutionMode.TESTNET
         
         self.execution_router = ExecutionRouter(
             mode=exec_mode,

@@ -57,6 +57,8 @@ env/
 
 # Logs and Data
 logs/
+!frontend/app/logs/
+!frontend/app/logs/**
 *.log
 data/*.csv
 data/*.json

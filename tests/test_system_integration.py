@@ -64,7 +64,7 @@ class TestStartupWithoutKeys:
             price=67000.0,
             strategy_id="test_dca",
         )
-        result = asyncio.get_event_loop().run_until_complete(broker.execute_order(intent))
+        result = asyncio.run(broker.execute_order(intent))
         assert result.success
         assert result.filled_quantity == 0.01
         assert result.average_price > 0
@@ -84,7 +84,7 @@ class TestStartupWithoutKeys:
                 if len(ticks) >= 5:
                     gen.stop()
 
-        asyncio.get_event_loop().run_until_complete(collect())
+        asyncio.run(collect())
         assert len(ticks) >= 5
         for symbol, price, ts in ticks:
             assert symbol == "BTC/USDT"
@@ -286,7 +286,7 @@ class TestPriceFeedDisconnect:
                 if len(ticks) >= 3:
                     gen.stop()
 
-        asyncio.get_event_loop().run_until_complete(run())
+        asyncio.run(run())
         assert not gen.is_running
         assert len(ticks) >= 3
 
@@ -307,7 +307,7 @@ class TestPriceFeedDisconnect:
             assert result is True
             assert bot.state == BotInstanceState.STOPPED
 
-        asyncio.get_event_loop().run_until_complete(start_and_stop())
+        asyncio.run(start_and_stop())
 
     def test_paper_broker_rejects_no_price(self):
         """PaperBroker should reject orders when no price is set."""
@@ -321,7 +321,7 @@ class TestPriceFeedDisconnect:
             quantity=1.0,
             strategy_id="test",
         )
-        result = asyncio.get_event_loop().run_until_complete(broker.execute_order(intent))
+        result = asyncio.run(broker.execute_order(intent))
         assert not result.success
         assert "No price" in result.error_message
 

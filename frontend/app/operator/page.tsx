@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -60,12 +61,12 @@ export default function OperatorPage() {
             ]);
 
             if (opRes.ok) {
-                const opData = await opRes.json();
-                setState(opData.data || emptyOperatorState);
+                const opPayload = await opRes.json();
+                setState(unwrapApiData<OperatorState>(opPayload) || emptyOperatorState);
             }
             if (incRes.ok) {
-                const incData = await incRes.json();
-                setIncidentState(incData.data || emptyIncidentState);
+                const incPayload = await incRes.json();
+                setIncidentState(unwrapApiData<IncidentState>(incPayload) || emptyIncidentState);
             }
             setError(null);
         } catch (e: any) {
@@ -111,7 +112,8 @@ export default function OperatorPage() {
         try {
             await fetch(`${API_URL}/api/operator/resume`, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: 'Manual resume from dashboard' })
             });
             fetchState();
         } catch (e: any) {

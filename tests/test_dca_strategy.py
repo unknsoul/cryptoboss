@@ -260,7 +260,7 @@ class TestDCAStrategy:
         # Total: 100 + 200 + 400 + 800 + 1600 + 3200 = 6300
         
         total = dca.calculate_total_investment()
-        assert total == pytest.approx(6400, rel=0.01)
+        assert total == pytest.approx(6300, rel=0.01)
     
     def test_no_deal_during_cooldown(self, sample_data):
         """Test that no new deal starts during cooldown."""

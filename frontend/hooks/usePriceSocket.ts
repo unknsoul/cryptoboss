@@ -24,7 +24,7 @@ export interface PriceData {
     symbol: string;
     price: number;
     timestamp: number;
-    source: 'TESTNET' | 'LIVE';
+    source: string;  // 'TESTNET', 'LIVE', 'BINANCE_MAINNET', etc.
 }
 
 export interface PricesState {
@@ -47,10 +47,24 @@ export interface UsePriceSocketReturn {
     lastUpdate: number | null;
 }
 
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'];
+
+function getWsBase(): string {
+    if (process.env.NEXT_PUBLIC_WS_URL) {
+        return process.env.NEXT_PUBLIC_WS_URL;
+    }
+
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+    return apiBase
+        .replace(/^http/, 'ws')
+        .replace('://localhost', '://127.0.0.1');
+}
+
+const WS_BASE = getWsBase();
 
 export function usePriceSocket(options: UsePriceSocketOptions = {}): UsePriceSocketReturn {
-    const { exchangeAccountId, symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'], autoConnect = true } = options;
+    const { exchangeAccountId, autoConnect = true } = options;
+    const symbolsKey = (options.symbols || DEFAULT_SYMBOLS).join(',');
     const { activeAccount } = useAuth();
 
     const [prices, setPrices] = useState<PricesState>({});
@@ -85,8 +99,7 @@ export function usePriceSocket(options: UsePriceSocketOptions = {}): UsePriceSoc
         setError(null);
 
         try {
-            const symbolsParam = symbols.join(',');
-            const wsUrl = `${WS_BASE}/ws/prices?account=${connectId}&symbols=${symbolsParam}`;
+            const wsUrl = `${WS_BASE}/ws/prices?account=${connectId}&symbols=${symbolsKey}`;
 
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
@@ -102,22 +115,37 @@ export function usePriceSocket(options: UsePriceSocketOptions = {}): UsePriceSoc
                 try {
                     const data = JSON.parse(event.data);
 
-                    // Handle price updates
+                    // Helper: parse timestamp to epoch ms
+                    const parseTimestamp = (ts: any): number => {
+                        if (!ts) return Date.now();
+                        if (typeof ts === 'number') {
+                            // If it's seconds (< 1e12), convert to ms
+                            return ts < 1e12 ? ts * 1000 : ts;
+                        }
+                        // ISO string
+                        const parsed = new Date(ts).getTime();
+                        return isNaN(parsed) ? Date.now() : parsed;
+                    };
+
+                    // Handle individual price updates
                     if (data.type === 'price' || data.channel === 'prices') {
                         const priceData: PriceData = {
                             symbol: data.symbol || data.data?.symbol,
-                            price: parseFloat(data.price || data.data?.price),
-                            timestamp: data.timestamp || data.data?.timestamp || Date.now(),
+                            price: parseFloat(data.price ?? data.data?.price ?? 0),
+                            timestamp: parseTimestamp(data.timestamp || data.data?.timestamp),
                             source: data.source || data.data?.source || 'TESTNET'
                         };
 
-                        // Only update if matches our account
-                        if (!data.exchange_account_id || data.exchange_account_id === accountId) {
-                            setPrices(prev => ({
-                                ...prev,
-                                [priceData.symbol]: priceData
-                            }));
-                            setLastUpdate(Date.now());
+                        // Only update if we got a valid price
+                        if (priceData.symbol && priceData.price > 0) {
+                            // Only update if matches our account (or no account filter)
+                            if (!data.exchange_account_id || data.exchange_account_id === accountId) {
+                                setPrices(prev => ({
+                                    ...prev,
+                                    [priceData.symbol]: priceData
+                                }));
+                                setLastUpdate(Date.now());
+                            }
                         }
                     }
 
@@ -160,7 +188,7 @@ export function usePriceSocket(options: UsePriceSocketOptions = {}): UsePriceSoc
             setError(e instanceof Error ? e.message : 'Connection failed');
             setStatus('error');
         }
-    }, [accountId, symbols]);
+    }, [accountId, symbolsKey]);
 
     const disconnect = useCallback(() => {
         // Clear reconnect timeout

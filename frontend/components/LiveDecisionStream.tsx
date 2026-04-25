@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { unwrapApiData } from "@/lib/api";
 
 interface TradeDecision {
     decision_id: string;
@@ -103,7 +104,8 @@ export default function LiveDecisionStream({
                 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
                 const res = await fetch(`${API_URL}/api/v11/decisions?limit=20`);
                 if (res.ok) {
-                    const data = await res.json();
+                    const payload = await res.json();
+                    const data: any = unwrapApiData(payload);
                     setDecisions(data.decisions || []);
                 }
             } catch (e) {

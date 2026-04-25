@@ -14,6 +14,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export default function AccountsPage() {
     const { user, accounts, activeAccount, selectAccount, createAccount, isLoading, isAuthenticated, refreshAccounts } = useAuth();
     const [showAddForm, setShowAddForm] = useState(false);
@@ -76,8 +78,8 @@ export default function AccountsPage() {
         setError('');
 
         try {
-            const token = localStorage.getItem('auth_token');
-            const response = await fetch(`http://localhost:8000/api/accounts/${resetModal.accountId}/reset`, {
+            const token = localStorage.getItem('cryptoboss_token');
+            const response = await fetch(`${API_URL}/api/accounts/${resetModal.accountId}/reset`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

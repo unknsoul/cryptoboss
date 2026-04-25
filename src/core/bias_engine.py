@@ -365,8 +365,12 @@ class BiasEngine:
             return new_bias, f"Bias unchanged: {new_bias.value}"
         
         # Check if enough time has passed since last flip
-        if self.current_bias.last_flip_time:
-            time_since_flip = (timestamp - self.current_bias.last_flip_time).total_seconds() / 3600
+        last_bias_change = self.current_bias.last_flip_time
+        if last_bias_change is None and self.current_bias.bias != TradeBias.NEUTRAL:
+            last_bias_change = self.current_bias.timestamp
+
+        if last_bias_change:
+            time_since_flip = (timestamp - last_bias_change).total_seconds() / 3600
             
             if time_since_flip < self.min_flip_interval_hours:
                 return (

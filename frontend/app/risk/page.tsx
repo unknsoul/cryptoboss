@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -62,24 +63,34 @@ export default function RiskCapitalPage() {
                 throw new Error('Failed to fetch risk data');
             }
 
-            const data = await response.json();
+            const payload = await response.json();
+            const data: any = unwrapApiData(payload);
+            const dailyLimit =
+                data.limits?.daily_loss_limit ??
+                ((data.limits?.daily_loss_limit_pct ?? 5) / 100) * (data.capital?.initial || 10000);
+            const weeklyLimit = data.limits?.weekly_loss_limit ?? dailyLimit * 3;
+            const maxDailyTrades = data.limits?.max_trades_per_day || 10;
+            const tradesRemaining = data.remaining_budget?.trades_remaining;
+            const tradesUsed = typeof tradesRemaining === 'number'
+                ? Math.max(maxDailyTrades - tradesRemaining, 0)
+                : (data.remaining_budget?.trades_today || 0);
 
             // Map backend response to our structure
             setRisk({
                 dailyLoss: {
                     current: data.daily_pnl || 0,
-                    limit: data.limits?.daily_loss_limit || 500,
-                    pct: Math.abs((data.daily_pnl || 0) / (data.limits?.daily_loss_limit || 500) * 100)
+                    limit: dailyLimit,
+                    pct: Math.abs((data.daily_pnl || 0) / dailyLimit * 100)
                 },
                 weeklyLoss: {
                     current: data.weekly_pnl || 0,
-                    limit: data.limits?.weekly_loss_limit || 1500,
-                    pct: Math.abs((data.weekly_pnl || 0) / (data.limits?.weekly_loss_limit || 1500) * 100)
+                    limit: weeklyLimit,
+                    pct: Math.abs((data.weekly_pnl || 0) / weeklyLimit * 100)
                 },
                 tradeBudget: {
                     daily: {
-                        used: data.remaining_budget?.trades_today || 0,
-                        max: data.limits?.max_trades_per_day || 10
+                        used: tradesUsed,
+                        max: maxDailyTrades
                     },
                     perContext: {
                         used: data.remaining_budget?.context_trades || 0,

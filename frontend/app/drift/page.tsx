@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -53,9 +54,10 @@ export default function DriftPage() {
             });
 
             if (!response.ok) throw new Error('Failed to fetch drift data');
-            const data = await response.json();
-            setMetrics(data.data?.metrics || emptyMetrics);
-            setAlerts(data.data?.alerts || []);
+            const payload = await response.json();
+            const data: any = unwrapApiData(payload);
+            setMetrics(data?.metrics || emptyMetrics);
+            setAlerts(data?.alerts || []);
             setError(null);
         } catch (e: any) {
             console.error('Drift fetch error:', e);
