@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 /**
  * Decision Flow Page
@@ -121,8 +122,10 @@ export default function DecisionFlowPage() {
                 throw new Error('Failed to fetch decisions');
             }
 
-            const data = await response.json();
-            const formatted = (Array.isArray(data) ? data : []).map(formatDecisionForDisplay);
+            const payload = await response.json();
+            const data: any = unwrapApiData(payload);
+            const rawDecisions: any[] = Array.isArray(data) ? data : (data.decisions || []);
+            const formatted: Decision[] = rawDecisions.map(formatDecisionForDisplay);
 
             setDecisions(formatted);
             setStats({

@@ -11,6 +11,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -71,7 +72,8 @@ export default function MarketContextPage() {
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
                 if (res.ok) {
-                    const data = await res.json();
+                    const payload = await res.json();
+                    const data: any = unwrapApiData(payload);
                     // Only set if data has context info
                     if (data.market_context || data.regime) {
                         setContextData({

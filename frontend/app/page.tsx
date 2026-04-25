@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { LivePricesGrid, PriceStatusBanner } from '@/components/LivePriceCard';
 import { PLGraph } from '@/components/PLGraph';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -124,11 +125,14 @@ export default function OverviewPage() {
                 fetch(`${API_URL}/api/risk`)
             ]);
 
-            const [system, context, risk] = await Promise.all([
+            const [systemPayload, contextPayload, riskPayload] = await Promise.all([
                 systemRes.json(),
                 contextRes.json(),
                 riskRes.json()
             ]);
+            const system: any = unwrapApiData(systemPayload);
+            const context: any = unwrapApiData(contextPayload);
+            const risk: any = unwrapApiData(riskPayload);
 
             setSystemData({
                 context: {
@@ -162,6 +166,19 @@ export default function OverviewPage() {
                     total: risk.limits?.max_trades_per_day || 10,
                     perContext: 2
                 }
+            });
+
+            const incidentState = String(system.incident_state || 'NORMAL').toLowerCase() as
+                'normal' | 'degraded' | 'incident_freeze' | 'halted';
+            setSafetyMetrics({
+                no_trade_rate: risk.no_trade_rate || 0,
+                permission_rejection_rate: risk.permission_rejection_rate || 0,
+                capital_veto_rate: risk.capital_veto_rate || 0,
+                exchange_degradation_count: risk.exchange_degradation_count || 0,
+                incident_freeze_count: system.incident_state === 'INCIDENT_FREEZE' ? 1 : 0,
+                halt_count: system.kill_switch?.active ? 1 : 0,
+                incident_state: incidentState,
+                is_paused: Boolean(system.kill_switch?.active || risk.kill_switch_active)
             });
 
             setLastUpdate(new Date().toLocaleTimeString('en-GB', { hour12: false }));
@@ -593,4 +610,3 @@ export default function OverviewPage() {
         </div>
     );
 }
-

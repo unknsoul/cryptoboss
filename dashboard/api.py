@@ -183,7 +183,7 @@ class DataSourceTag(str, Enum):
 class EnvironmentSignature:
     _instance = None
     _locked = False
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -191,7 +191,7 @@ class EnvironmentSignature:
             cls._instance._started_at = datetime.now()
             cls._instance._checksum = None
         return cls._instance
-    
+
     def lock(self, mode: str):
         """Lock environment - can only be called once at startup."""
         if self._locked:
@@ -203,7 +203,7 @@ class EnvironmentSignature:
         ).hexdigest()[:16]
         self._locked = True
         logger.warning(f"🔒 ENVIRONMENT LOCKED: {mode.upper()} (checksum: {self._checksum})")
-    
+
     def get_signature(self) -> Dict:
         return {
             "mode": self._mode.upper(),
@@ -211,15 +211,15 @@ class EnvironmentSignature:
             "immutable_since": self._started_at.isoformat(),
             "is_live": self._mode == "live"
         }
-    
+
     @property
     def mode(self) -> str:
         return self._mode
-    
+
     @property
     def is_locked(self) -> bool:
         return self._locked
-    
+
 
 env_signature = EnvironmentSignature()
 
@@ -234,14 +234,14 @@ def wrap_response(data: Dict, data_source: DataSourceTag = None) -> Dict:
             data_source = DataSourceTag.TESTNET_EXCHANGE
         else:
             data_source = DataSourceTag.SIMULATED
-    
+
     response = {
         "data": data,
         "environment_signature": env_signature.get_signature(),
         "data_source": data_source.value,
         "timestamp": datetime.now().isoformat()
     }
-    
+
     # v1.0.1: Add mandatory identity fields if account is active
     if SCOPED_STATE_AVAILABLE:
         active_state = get_active_state()
@@ -251,13 +251,33 @@ def wrap_response(data: Dict, data_source: DataSourceTag = None) -> Dict:
             response["data_scope"] = "SCOPED"
             response["is_new_account"] = active_state.state.is_new_account()
             response["account_created_at"] = active_state.state.created_at.isoformat()
-    
+
     # Also include from dashboard state if available
     if hasattr(state, 'active_exchange_account_id') and state.active_exchange_account_id:
         response["exchange_account_id"] = state.active_exchange_account_id
     if hasattr(state, 'active_user_id') and state.active_user_id:
         response["user_id"] = state.active_user_id
-    
+
+    return response
+
+
+def wrap_legacy_response(data: Dict, data_source: DataSourceTag = None) -> Dict:
+    """
+    Return the canonical wrapped response while mirroring payload keys at top level.
+
+    Some dashboard views were written before the API response envelope was added.
+    Keeping both shapes avoids blank cards while preserving the envelope for newer code.
+    """
+    response = wrap_response(data, data_source)
+    if isinstance(data, dict):
+        response.update(data)
+    return response
+
+
+def response_data(response: Any) -> Any:
+    """Extract payload data from either wrapped or legacy API responses."""
+    if isinstance(response, dict) and "data" in response:
+        return response["data"]
     return response
 
 
@@ -287,7 +307,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         return None
     if not credentials:
         return None
-    
+
     auth_service = get_auth_service()
     return auth_service.verify_token(credentials.credentials)
 
@@ -372,7 +392,7 @@ class DashboardState:
         self.losing_trades = 0
         self.api_validated = False
         self.exchange_client = None
-        
+
         # System state - PAPER REMOVED
         self.environment = "testnet"  # testnet or live ONLY
         self.connection_status = "disconnected"  # disconnected, connecting, connected, error
@@ -380,26 +400,26 @@ class DashboardState:
         self.last_time_sync = None
         self.kill_switch_active = False
         self.kill_switch_reason = None
-        
+
         # v1.0.0: Incident State Machine
         self.incident_state = "NORMAL"  # NORMAL, DEGRADED, INCIDENT_FREEZE, HALTED
         self.incident_reason = None
         self.incident_started_at = None
-        
+
         # v1.0.0: Operator Controls
         self.trading_paused = False
         self.trading_pause_reason = None
         self.operator_action_log: List[Dict] = []  # Permanent log
-        
+
         # v1.0.1: Identity tracking
         self.active_user_id: Optional[str] = None
         self.active_exchange_account_id: Optional[str] = None
-        
+
         # Market context
         self.market_context = "UNKNOWN"  # TRENDING, RANGING, VOLATILE, CRISIS
         self.market_bias = "NEUTRAL"  # BULLISH, BEARISH, NEUTRAL
         self.last_context_update = None
-        
+
         # Decision tracking
         self.recent_decisions: List[Dict] = []
         self.last_decision_time = None
@@ -409,14 +429,14 @@ class DashboardState:
     def reset(self, new_mode: str = "testnet"):
         """
         Reset all state for new session.
-        
+
         CRITICAL: Paper mode is removed. Only testnet/live allowed.
         """
         # Validate mode - reject paper
         if new_mode.lower() not in ("testnet", "live"):
             logger.warning(f"⚠️ Invalid mode '{new_mode}' requested — using testnet")
             new_mode = "testnet"
-        
+
         self.session_id = str(uuid.uuid4())
         self.mode = new_mode
         self.capital = 0.0  # Will be fetched from exchange
@@ -430,7 +450,7 @@ class DashboardState:
         self.winning_trades = 0
         self.losing_trades = 0
         self.api_validated = False  # Must connect to exchange
-        
+
         # Reset system state
         self.environment = new_mode
         self.connection_status = "disconnected"  # Must connect to exchange
@@ -440,12 +460,12 @@ class DashboardState:
         self.recent_decisions = []
         self.decisions_today = 0
         self.rejections_today = 0
-        
+
         if self.exchange_client:
             asyncio.create_task(self._destroy_client())
         self.exchange_client = None
         logger.info(f"Session reset: {self.session_id[:8]}... (mode={new_mode})")
-    
+
     async def _destroy_client(self):
         if self.exchange_client:
             try:
@@ -457,17 +477,17 @@ class DashboardState:
     @property
     def portfolio_value(self) -> float:
         return self.capital + (self.position * self.current_price)
-    
+
     @property
     def unrealized_pnl(self) -> float:
         if self.position > 0:
             return (self.current_price - self.position_entry_price) * self.position
         return 0.0
-    
+
     @property
     def total_pnl(self) -> float:
         return self.pnl + self.unrealized_pnl
-    
+
     @property
     def win_rate(self) -> float:
         if self.total_trades == 0:
@@ -930,17 +950,17 @@ else:
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-    
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
         logger.info(f"Client connected. Total: {len(self.active_connections)}")
-    
+
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
         logger.info(f"Client disconnected. Total: {len(self.active_connections)}")
-    
+
     async def broadcast(self, message: dict):
         disconnected = []
         for connection in self.active_connections:
@@ -948,7 +968,7 @@ class ConnectionManager:
                 await connection.send_json(message)
             except:
                 disconnected.append(connection)
-        
+
         for conn in disconnected:
             self.disconnect(conn)
 
@@ -985,7 +1005,7 @@ async def get_session():
 async def switch_session(request: SessionSwitchRequest):
     """
     Switch trading mode and create a new session.
-    
+
     This endpoint:
     1. Validates API credentials (for non-paper modes)
     2. Resets all state to fresh values
@@ -993,18 +1013,19 @@ async def switch_session(request: SessionSwitchRequest):
     4. Returns fresh exchange balances (if applicable)
     """
     mode = request.mode.lower()
-    
+
     if mode not in ["testnet", "live"]:
         raise HTTPException(status_code=400, detail="Invalid mode. Must be: testnet or live")
-    
+
     # Always require API credentials — paper mode removed
     balances = {}
     if not request.api_key or not request.api_secret:
         raise HTTPException(status_code=400, detail="API credentials required")
-    
+
     if not BINANCE_AVAILABLE:
         raise HTTPException(status_code=500, detail="Exchange client not available")
-    
+
+    client = None
     try:
         # Create client and validate
         testnet = mode == "testnet"
@@ -1013,32 +1034,43 @@ async def switch_session(request: SessionSwitchRequest):
             api_secret=request.api_secret,
             testnet=testnet
         )
-        
+
         validation = await client.validate_credentials()
-        
+
         if not validation["success"]:
             await client.destroy()
             raise HTTPException(status_code=401, detail=f"Invalid credentials: {validation['message']}")
-        
+
         balances = validation.get("balances", {})
-        
-        # Store the client in state
-        state.exchange_client = client
-        state.api_validated = True
-        
-        # Start real trading loop now that exchange is connected
-        await start_real_trading_loop()
-        logger.info(f"Trading loop started for {mode.upper()} mode")
-        
+
     except HTTPException:
         raise
     except Exception as e:
+        if client:
+            try:
+                await client.destroy()
+            except Exception:
+                pass
         logger.error(f"Session switch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-    # Reset state for new session
+
+    # Reset state for new session before attaching the validated exchange client.
     state.reset(mode)
-    
+    state.exchange_client = client
+    state.api_validated = True
+    state.connection_status = "connected"
+    state.last_time_sync = datetime.now()
+    state.timestamp_offset_ms = 0
+    usdt_balance = balances.get("USDT", balances.get("usdt", 0)) if isinstance(balances, dict) else 0
+    if isinstance(usdt_balance, dict):
+        usdt_balance = usdt_balance.get("free", usdt_balance.get("total", 0))
+    state.initial_capital = float(usdt_balance or 0)
+    state.capital = float(usdt_balance or 0)
+
+    # Start real trading loop now that exchange is connected.
+    await start_real_trading_loop()
+    logger.info(f"Trading loop started for {mode.upper()} mode")
+
     # Broadcast session change to WebSocket clients
     await manager.broadcast({
         "type": "session_change",
@@ -1046,9 +1078,9 @@ async def switch_session(request: SessionSwitchRequest):
         "mode": mode,
         "message": f"Switched to {mode.upper()} mode"
     })
-    
+
     logger.info(f"Session switched: {state.session_id[:8]}... (mode={mode})")
-    
+
     return {
         "success": True,
         "session_id": state.session_id,
@@ -1071,19 +1103,19 @@ async def validate_keys(request: ValidateKeysRequest):
             "message": "Exchange client not available",
             "balances": {}
         }
-    
+
     try:
         client = BinanceClient(
             api_key=request.api_key,
             api_secret=request.api_secret,
             testnet=request.testnet
         )
-        
+
         result = await client.validate_credentials()
         await client.destroy()
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Key validation error: {e}")
         return {
@@ -1098,14 +1130,14 @@ async def reset_session():
     """Reset current session (keep same mode but clear all data)."""
     current_mode = state.mode
     state.reset(current_mode)
-    
+
     await manager.broadcast({
         "type": "session_change",
         "session_id": state.session_id,
         "mode": current_mode,
         "message": "Session reset"
     })
-    
+
     return {
         "success": True,
         "session_id": state.session_id,
@@ -1120,18 +1152,18 @@ async def reset_session():
 async def signup(request: SignupRequest):
     """
     Create a new user account.
-    
+
     CryptoBoss 1.0.1: Email/password authentication.
     """
     if not AUTH_AVAILABLE:
         raise HTTPException(status_code=501, detail="Auth services not available")
-    
+
     auth_service = get_auth_service()
     result = auth_service.signup(request.email, request.password)
-    
+
     if not result.success:
         raise HTTPException(status_code=400, detail=result.error)
-    
+
     return wrap_response({
         "success": True,
         "token": result.token,
@@ -1146,15 +1178,15 @@ async def login(request: LoginRequest):
     """
     if not AUTH_AVAILABLE:
         raise HTTPException(status_code=501, detail="Auth services not available")
-    
+
     auth_service = get_auth_service()
     result = auth_service.login(request.email, request.password)
-    
+
     if not result.success:
         raise HTTPException(status_code=401, detail=result.error)
-    
+
     logger.info(f"✅ User logged in: {request.email}")
-    
+
     return wrap_response({
         "success": True,
         "token": result.token,
@@ -1189,13 +1221,13 @@ async def get_me(user: User = Depends(require_auth)):
 async def create_account(request: CreateAccountRequest, user: User = Depends(require_auth)):
     """
     Create a new exchange account.
-    
+
     CryptoBoss 1.0.1: Each API key pair creates a NEW exchange_account_id.
     All state is scoped to this account.
     """
     if not AUTH_AVAILABLE:
         raise HTTPException(status_code=501, detail="Auth services not available")
-    
+
     account_service = get_account_service()
     result = account_service.create_account(
         user_id=user.user_id,
@@ -1205,12 +1237,12 @@ async def create_account(request: CreateAccountRequest, user: User = Depends(req
         api_secret=request.api_secret,
         label=request.label
     )
-    
+
     if not result.success:
         raise HTTPException(status_code=400, detail=result.error)
-    
+
     logger.info(f"✅ New exchange account: {result.account.exchange_account_id[:8]}...")
-    
+
     return wrap_response({
         "success": True,
         "account": result.account.to_dict(),
@@ -1225,10 +1257,10 @@ async def list_accounts(user: User = Depends(require_auth)):
     """
     if not AUTH_AVAILABLE:
         raise HTTPException(status_code=501, detail="Auth services not available")
-    
+
     account_service = get_account_service()
     result = account_service.get_accounts(user.user_id)
-    
+
     return wrap_response({
         "accounts": [acc.to_dict() for acc in result.accounts],
         "count": len(result.accounts)
@@ -1239,9 +1271,9 @@ async def list_accounts(user: User = Depends(require_auth)):
 async def select_account(request: SelectAccountRequest, user: User = Depends(require_auth)):
     """
     Select an exchange account as active.
-    
+
     FUNDAMENTAL AXIOM: There is NO such thing as a global bot state.
-    
+
     THIS TRIGGERS:
     1. STOP current bot instance
     2. DESTROY all its memory
@@ -1250,18 +1282,18 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
     """
     if not AUTH_AVAILABLE:
         raise HTTPException(status_code=501, detail="Auth services not available")
-    
+
     account_service = get_account_service()
     result = account_service.get_account(user.user_id, request.exchange_account_id)
-    
+
     if not result.success:
         raise HTTPException(status_code=404, detail=result.error)
-    
+
     # === TRUE INSTANCE ISOLATION ===
     # Step 1-4: Switch bot instance (STOP → DESTROY → START)
     bot_instance = None
     is_new_account = False
-    
+
     if BOT_INSTANCE_AVAILABLE:
         logger.info(f"🔄 Switching bot instance to {request.exchange_account_id[:8]}...")
         bot_instance = switch_bot_instance(
@@ -1271,12 +1303,12 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
         )
         is_new_account = len(bot_instance.trading_state.trade_history) == 0
         logger.info(f"✅ Bot instance switched - {'NEW' if is_new_account else 'existing'} account")
-    
+
     # Legacy: Also reset dashboard state
     state.reset(result.account.environment.lower())
     state.active_exchange_account_id = result.account.exchange_account_id
     state.active_user_id = user.user_id
-    
+
     # Legacy: Switch scoped state manager
     if SCOPED_STATE_AVAILABLE:
         try:
@@ -1284,11 +1316,11 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
             logger.info(f"🔒 ScopedStateManager also switched")
         except Exception as e:
             logger.warning(f"ScopedStateManager switch failed: {e}")
-    
+
     # Lock environment based on account
     if not env_signature.is_locked:
         env_signature.lock(result.account.environment.lower())
-    
+
     # CRYPTOBOSS 2.0: Save active account to SQLite for persistence
     try:
         from src.core.database.repository import get_repository
@@ -1296,9 +1328,9 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
         repo.set_active_account(user.user_id, result.account.exchange_account_id)
     except Exception as e:
         logger.warning(f"Could not save active account to SQLite: {e}")
-    
+
     logger.info(f"🎯 Account switch complete: {result.account.exchange_account_id[:8]}... ({result.account.environment})")
-    
+
     # Broadcast ACCOUNT_CHANGED event (frontend MUST reset everything)
     await manager.broadcast({
         "type": "ACCOUNT_CHANGED",
@@ -1315,12 +1347,12 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
             "REQUEST_FRESH_DATA"
         ]
     })
-    
+
     # Get dashboard data from the new bot instance
     dashboard_data = None
     if bot_instance:
         dashboard_data = bot_instance.get_dashboard_data()
-    
+
     return wrap_response({
         "success": True,
         "account": result.account.to_dict(),
@@ -1335,20 +1367,20 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
 async def delete_account(exchange_account_id: str, user: User = Depends(require_auth)):
     """
     Delete/archive an exchange account.
-    
+
     Warning: This archives the account and all associated data.
     """
     if not AUTH_AVAILABLE:
         raise HTTPException(status_code=501, detail="Auth services not available")
-    
+
     account_service = get_account_service()
     result = account_service.delete_account(user.user_id, exchange_account_id)
-    
+
     if not result.success:
         raise HTTPException(status_code=404, detail=result.error)
-    
+
     logger.warning(f"🗑️ Account archived: {exchange_account_id[:8]}...")
-    
+
     return wrap_response({
         "success": True,
         "message": "Account archived"
@@ -1366,23 +1398,23 @@ async def get_active_account(user: User = Depends(require_auth)):
             "account": None,
             "message": "No account selected"
         })
-    
+
     account_service = get_account_service()
     result = account_service.get_account(user.user_id, state.active_exchange_account_id)
-    
+
     if not result.success:
         return wrap_response({
             "active": False,
             "account": None,
             "message": "Account not found"
         })
-    
+
     # Get key fingerprint for display
     fingerprint = account_service.get_key_fingerprint(user.user_id, state.active_exchange_account_id)
-    
+
     account_data = result.account.to_dict()
     account_data["api_key_fingerprint"] = fingerprint
-    
+
     return wrap_response({
         "active": True,
         "account": account_data
@@ -1400,48 +1432,48 @@ class ResetAccountRequest(BaseModel):
 async def reset_account(exchange_account_id: str, request: ResetAccountRequest, user: User = Depends(require_auth)):
     """
     Reset account state - DELETE all trades and analytics data.
-    
+
     CRYPTOBOSS 2.0: Account reset functionality.
-    
+
     WHAT GETS DELETED:
     - All trades for this account
     - PnL history
     - Bot instance state
-    
+
     WHAT STAYS:
     - User account
     - Exchange account (API keys)
     - Other exchange accounts
-    
+
     REQUIRES: confirm=True and a reason.
     """
     if not request.confirm:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Must set confirm=true to reset account. This is destructive!"
         )
-    
+
     if len(request.reason) < 10:
         raise HTTPException(
             status_code=400,
             detail="Reason must be at least 10 characters"
         )
-    
+
     try:
         from src.core.database.repository import get_repository
         repo = get_repository()
-        
+
         # Verify user owns this account
         account = repo.find_account_by_id(exchange_account_id)
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
-        
+
         if account.user_id != user.user_id:
             raise HTTPException(status_code=403, detail="Not your account")
-        
+
         # Delete all trades for this account
         deleted_count = repo.delete_trades_for_account(user.user_id, exchange_account_id)
-        
+
         # Log the action
         logger.warning(
             f"🗑️ ACCOUNT RESET: {exchange_account_id[:8]}... | "
@@ -1449,7 +1481,7 @@ async def reset_account(exchange_account_id: str, request: ResetAccountRequest, 
             f"Trades deleted: {deleted_count} | "
             f"Reason: {request.reason}"
         )
-        
+
         # Reset bot instance if available
         if BOT_INSTANCE_AVAILABLE:
             try:
@@ -1464,7 +1496,7 @@ async def reset_account(exchange_account_id: str, request: ResetAccountRequest, 
                     )
             except Exception as e:
                 logger.warning(f"Could not reset bot instance: {e}")
-        
+
         return wrap_response({
             "success": True,
             "trades_deleted": deleted_count,
@@ -1473,7 +1505,7 @@ async def reset_account(exchange_account_id: str, request: ResetAccountRequest, 
             "reason": request.reason,
             "message": f"Account reset complete. {deleted_count} trades deleted."
         })
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1487,13 +1519,13 @@ async def reset_account(exchange_account_id: str, request: ResetAccountRequest, 
 async def get_system():
     """
     Get complete system state.
-    
+
     Returns environment, connection, time sync, kill switch state.
     This is the primary endpoint for dashboard observability.
     Includes environment_signature per CryptoBoss 1.0.0 spec.
     """
     uptime = (datetime.now() - state.start_time).total_seconds()
-    
+
     system_data = {
         "session_id": state.session_id,
         "environment": state.environment,
@@ -1511,14 +1543,14 @@ async def get_system():
         "ws_clients": len(manager.active_connections),
         "incident_state": "NORMAL"  # v1.0.0: Incident state tracking
     }
-    return wrap_response(system_data)
+    return wrap_legacy_response(system_data)
 
 
 @app.get("/api/context")
 async def get_context():
     """
     Get current market context and bias.
-    
+
     Used by dashboard to show trading environment.
     Includes data_source tag per specification.
     """
@@ -1530,14 +1562,14 @@ async def get_context():
         "price_change_pct": ((state.current_price - state.last_price) / state.last_price * 100) if state.last_price > 0 else 0,
         "symbol": "BTC/USDT"
     }
-    return wrap_response(context_data, DataSourceTag.DERIVED)
+    return wrap_legacy_response(context_data, DataSourceTag.DERIVED)
 
 
 @app.get("/api/decisions")
 async def get_decisions(limit: int = 50):
     """
     Get recent trading decisions.
-    
+
     Returns decision flow results, rejections, and outcomes.
     """
     return {
@@ -1553,12 +1585,12 @@ async def get_decisions(limit: int = 50):
 async def get_risk():
     """
     Get risk state and budget.
-    
+
     Shows drawdown, allocation, and remaining risk budget.
     CryptoBoss 1.0.0: All values tagged with data source.
     """
     drawdown_pct = (state.pnl / state.initial_capital * 100) if state.initial_capital > 0 else 0
-    
+
     risk_data = {
         "daily_pnl": state.pnl,
         "daily_pnl_pct": drawdown_pct,
@@ -1582,7 +1614,7 @@ async def get_risk():
         "risk_guardian_active": True,
         "capital_governor_active": True
     }
-    return wrap_response(risk_data, DataSourceTag.DERIVED)
+    return wrap_legacy_response(risk_data, DataSourceTag.DERIVED)
 
 
 @app.post("/api/kill-switch")
@@ -1590,21 +1622,21 @@ async def toggle_kill_switch(active: bool = True, reason: str = "Manual activati
     """Toggle the kill switch."""
     state.kill_switch_active = active
     state.kill_switch_reason = reason if active else None
-    
+
     await manager.broadcast({
         "type": "kill_switch",
         "active": active,
         "reason": reason
     })
-    
+
     # Stop/start trading loop based on kill switch
     if active:
         await stop_real_trading_loop()
     else:
         await start_real_trading_loop()
-    
+
     logger.warning(f"Kill switch {'ACTIVATED' if active else 'DEACTIVATED'}: {reason}")
-    
+
     return {
         "success": True,
         "kill_switch_active": state.kill_switch_active,
@@ -1639,52 +1671,96 @@ async def get_prices(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int
 async def get_live_prices():
     """
     Get live prices for multiple symbols.
-    
+
     CRYPTOBOSS 2.0: Real prices from Binance.
-    NO FALLBACK - if exchange unavailable, return empty.
+    Priority: MarketDataService WebSocket → python-binance REST → empty.
     """
     prices = {}
-    
+
     try:
-        if BINANCE_AVAILABLE:
-            # Determine if testnet based on environment
-            is_testnet = env_signature.mode == "testnet" or not env_signature.is_locked
-            
-            # Create client for price fetch
-            client = BinanceClient(testnet=is_testnet)
-            
+        # Priority 1: Use the already-running MarketDataService (WebSocket prices)
+        if MARKET_DATA_AVAILABLE:
+            service = get_market_data_service()
+            all_prices = service.get_all_prices()
+
             for symbol in SUPPORTED_SYMBOLS:
-                try:
-                    ticker = client.exchange.fetch_ticker(symbol.replace("USDT", "/USDT"))
+                ws_symbol = symbol.replace("USDT", "/USDT")
+                tick = all_prices.get(ws_symbol) or all_prices.get(symbol)
+
+                if tick and hasattr(tick, 'price') and tick.price > 0:
                     prices[symbol] = {
                         "symbol": symbol,
-                        "price": ticker.get("last", 0),
-                        "change24h": ticker.get("percentage", 0),
-                        "high24h": ticker.get("high", 0),
-                        "low24h": ticker.get("low", 0),
-                        "volume24h": ticker.get("quoteVolume", 0),
+                        "price": tick.price,
+                        "change24h": getattr(tick, 'change_24h', 0) or 0,
+                        "high24h": getattr(tick, 'high_24h', 0) or 0,
+                        "low24h": getattr(tick, 'low_24h', 0) or 0,
+                        "volume24h": getattr(tick, 'volume_24h', 0) or 0,
                         "timestamp": datetime.now().isoformat(),
-                        "source": "BINANCE_TESTNET" if is_testnet else "BINANCE_LIVE"
+                        "source": "BINANCE_WEBSOCKET"
                     }
-                except Exception as e:
-                    logger.warning(f"Failed to fetch {symbol}: {e}")
+                else:
                     prices[symbol] = {
                         "symbol": symbol,
                         "price": 0,
-                        "error": str(e),
+                        "error": "No WebSocket data yet",
                         "timestamp": datetime.now().isoformat()
                     }
-            
-            client.close()
-        else:
-            # No Binance client - return empty
+
+            # If we got at least one valid price, return immediately
+            if any(p.get("price", 0) > 0 for p in prices.values()):
+                return wrap_legacy_response({
+                    "prices": prices,
+                    "symbols": SUPPORTED_SYMBOLS,
+                    "count": len(prices)
+                })
+
+        # Priority 2: Public Binance REST fallback while WebSocket warms up.
+        try:
+            import requests
+
+            response = requests.get(
+                "https://api.binance.com/api/v3/ticker/24hr",
+                params={"symbols": json.dumps(SUPPORTED_SYMBOLS, separators=(",", ":"))},
+                timeout=5,
+            )
+            response.raise_for_status()
+            tickers = response.json()
+            ticker_map = {item.get("symbol"): item for item in tickers if item.get("symbol")}
+
+            for symbol in SUPPORTED_SYMBOLS:
+                ticker = ticker_map.get(symbol, {})
+                price_val = float(ticker.get("lastPrice", ticker.get("price", 0)) or 0)
+                prices[symbol] = {
+                    "symbol": symbol,
+                    "price": price_val,
+                    "change24h": float(ticker.get("priceChangePercent", 0) or 0),
+                    "high24h": float(ticker.get("highPrice", 0) or 0),
+                    "low24h": float(ticker.get("lowPrice", 0) or 0),
+                    "volume24h": float(ticker.get("quoteVolume", 0) or 0),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "BINANCE_REST",
+                }
+        except Exception as rest_err:
+            logger.warning(f"Binance public REST fallback failed: {rest_err}")
+            for symbol in SUPPORTED_SYMBOLS:
+                if symbol not in prices:
+                    prices[symbol] = {
+                        "symbol": symbol,
+                        "price": 0,
+                        "error": str(rest_err),
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+        # Priority 3: No data source available
+        if not prices:
             for symbol in SUPPORTED_SYMBOLS:
                 prices[symbol] = {
                     "symbol": symbol,
                     "price": 0,
-                    "error": "Exchange client not available",
+                    "error": "No price source available",
                     "timestamp": datetime.now().isoformat()
                 }
+
     except Exception as e:
         logger.error(f"Failed to fetch prices: {e}")
         for symbol in SUPPORTED_SYMBOLS:
@@ -1694,8 +1770,8 @@ async def get_live_prices():
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }
-    
-    return wrap_response({
+
+    return wrap_legacy_response({
         "prices": prices,
         "symbols": SUPPORTED_SYMBOLS,
         "count": len(prices)
@@ -1707,7 +1783,7 @@ async def get_live_prices():
 async def get_status():
     """Get current bot status."""
     uptime = (datetime.now() - state.start_time).total_seconds()
-    
+
     return {
         "session_id": state.session_id,
         "status": "running",
@@ -1734,7 +1810,7 @@ async def get_status():
 async def get_portfolio():
     """
     Get portfolio details.
-    
+
     RULE: Returns data ONLY from the active bot instance.
     New accounts = EMPTY portfolio.
     """
@@ -1744,7 +1820,7 @@ async def get_portfolio():
         if bot:
             trading_state = bot.trading_state
             positions = []
-            
+
             # Only show positions if they exist in THIS bot instance
             for pos in trading_state.positions:
                 positions.append({
@@ -1756,8 +1832,8 @@ async def get_portfolio():
                     "pnl": pos.get("pnl", 0),
                     "pnl_pct": pos.get("pnl_pct", 0)
                 })
-            
-            return wrap_response({
+
+            return wrap_legacy_response({
                 "balance": trading_state.balances if trading_state.balances else {"USDT": 10000.0, "BTC": 0.0},
                 "positions": positions,  # Empty for new accounts
                 "total_value_usd": sum(trading_state.balances.values()) if trading_state.balances else 10000.0,
@@ -1767,7 +1843,7 @@ async def get_portfolio():
             })
         else:
             # No bot instance - return empty
-            return wrap_response({
+            return wrap_legacy_response({
                 "balance": {"USDT": 0.0, "BTC": 0.0},
                 "positions": [],
                 "total_value_usd": 0,
@@ -1776,11 +1852,11 @@ async def get_portfolio():
                 "is_new_account": True,
                 "error": "No active bot instance"
             })
-    
+
     # Fallback to legacy state
     btc_value = state.position * state.current_price
-    
-    return wrap_response({
+
+    return wrap_legacy_response({
         "balance": {
             "USDT": round(state.capital, 2),
             "BTC": round(state.position, 6)
@@ -1802,11 +1878,298 @@ async def get_portfolio():
     })
 
 
+def _map_position(position: Dict[str, Any], idx: int) -> Dict[str, Any]:
+    """Map internal portfolio positions to the frontend Positions page contract."""
+    quantity = float(position.get("quantity", position.get("size", 0)) or 0)
+    current_price = float(position.get("current_price", state.current_price) or 0)
+    entry_price = float(position.get("entry_price", position.get("entryPrice", current_price)) or 0)
+    pnl = float(position.get("pnl", position.get("unrealized_pnl", position.get("unrealizedPnL", 0))) or 0)
+    pnl_pct = float(position.get("pnl_pct", position.get("pnlPercent", 0)) or 0)
+    side = position.get("side") or ("LONG" if quantity >= 0 else "SHORT")
+    exposure = float(position.get("value_usd", position.get("exposure", abs(quantity) * current_price)) or 0)
+
+    return {
+        "id": position.get("id", idx + 1),
+        "symbol": position.get("symbol", "BTC/USDT"),
+        "side": str(side).upper(),
+        "entryPrice": entry_price,
+        "currentPrice": current_price,
+        "size": abs(quantity),
+        "exposure": exposure,
+        "unrealizedPnL": pnl,
+        "pnlPercent": pnl_pct,
+        "entryTime": position.get("entry_time", position.get("entryTime", state.start_time.isoformat())),
+        "entryReason": position.get("entry_reason", position.get("reason")),
+        "stopLoss": position.get("stop_loss", position.get("stopLoss")),
+        "takeProfit": position.get("take_profit", position.get("takeProfit")),
+    }
+
+
+def _closed_positions_today(limit: int = 50) -> List[Dict[str, Any]]:
+    closed = []
+    for idx, trade in enumerate(state.trades[-limit:]):
+        if str(trade.get("side", "")).upper() != "SELL":
+            continue
+        exit_price = float(trade.get("price", 0) or 0)
+        size = float(trade.get("amount", trade.get("quantity", 0)) or 0)
+        realized_pnl = float(trade.get("pnl", 0) or 0)
+        closed.append({
+            "id": trade.get("id", idx + 1),
+            "symbol": trade.get("symbol", "BTC/USDT"),
+            "side": "LONG",
+            "entryPrice": float(trade.get("entry_price", 0) or 0),
+            "exitPrice": exit_price,
+            "size": size,
+            "realizedPnL": realized_pnl,
+            "pnlPercent": float(trade.get("pnl_pct", 0) or 0),
+            "entryTime": trade.get("entry_time", trade.get("time", "")),
+            "exitTime": trade.get("closed_at", trade.get("time", datetime.now().isoformat())),
+            "exitReason": trade.get("reason", "CLOSED"),
+        })
+    return closed
+
+
+@app.get("/api/positions")
+async def get_positions():
+    """Compatibility endpoint for the Next.js Positions page."""
+    portfolio = response_data(await get_portfolio())
+    raw_positions = portfolio.get("positions", []) if isinstance(portfolio, dict) else []
+    positions = [_map_position(position, idx) for idx, position in enumerate(raw_positions)]
+
+    return wrap_legacy_response({
+        "positions": positions,
+        "closed_today": _closed_positions_today(),
+        "count": len(positions),
+        "total_exposure": sum(item["exposure"] for item in positions),
+        "total_unrealized_pnl": sum(item["unrealizedPnL"] for item in positions),
+    })
+
+
+def _incident_level() -> int:
+    return {
+        "NORMAL": 0,
+        "DEGRADED": 1,
+        "INCIDENT_FREEZE": 2,
+        "HALTED": 3,
+    }.get(state.incident_state, 0)
+
+
+def _incident_snapshot() -> Dict[str, Any]:
+    started = state.incident_started_at
+    time_in_state = (datetime.now() - started).total_seconds() if started else 0
+    incident_count_today = sum(
+        1 for action in state.operator_action_log
+        if action.get("action") == "ACKNOWLEDGE_INCIDENT"
+    )
+    state_name = state.incident_state.lower()
+    return {
+        "state": state_name,
+        "reason": state.incident_reason,
+        "since": started.isoformat() if started else None,
+        "started_at": started.isoformat() if started else None,
+        "triggered_by": "system" if state.incident_reason else None,
+        "auto_recoverable": state.incident_state in ("NORMAL", "DEGRADED"),
+        "incident_count_today": incident_count_today,
+        "time_in_state_seconds": int(time_in_state),
+        "trading_allowed": state.incident_state == "NORMAL" and not state.trading_paused,
+        "position_reduction_only": state.incident_state == "INCIDENT_FREEZE",
+        "timeline": [],
+    }
+
+
+def _operator_snapshot() -> Dict[str, Any]:
+    last_action = state.operator_action_log[-1] if state.operator_action_log else {}
+    uptime = (datetime.now() - state.start_time).total_seconds()
+    return {
+        "trading_paused": state.trading_paused,
+        "pause_reason": state.trading_pause_reason,
+        "last_action": last_action.get("action"),
+        "last_action_by": last_action.get("operator"),
+        "uptime_seconds": int(uptime),
+        "incident_state": state.incident_state.lower(),
+        "actions": state.operator_action_log[-100:],
+    }
+
+
+def _risk_state_snapshot() -> Dict[str, Any]:
+    trading_allowed = (
+        state.incident_state == "NORMAL"
+        and not state.trading_paused
+        and not state.kill_switch_active
+    )
+    recent_events = [
+        {
+            "time": action.get("timestamp", datetime.now().isoformat()),
+            "event": action.get("action", "OPERATOR_ACTION"),
+            "details": action.get("reason", ""),
+            "type": "warning" if "PAUSE" in action.get("action", "") else "success",
+        }
+        for action in state.operator_action_log[-20:]
+    ]
+    return {
+        "market_context": {
+            "state": state.market_context,
+            "confidence": 75 if state.current_price > 0 else 0,
+            "time_in_state": "Active" if state.last_context_update else "--",
+            "trading_allowed": trading_allowed,
+            "history": [],
+        },
+        "regime": state.market_context,
+        "cooldown": {
+            "active": state.trading_paused,
+            "remaining": "manual",
+            "reason": state.trading_pause_reason,
+        },
+        "latency_ms": abs(state.timestamp_offset_ms) if state.timestamp_offset_ms else None,
+        "exchange_status": state.connection_status.upper(),
+        "rejection_rate": 0,
+        "partial_fill_ratio": 0,
+        "avg_fill_time_ms": None,
+        "escalation_level": _incident_level(),
+        "recent_events": recent_events,
+        "daily_pnl": state.pnl,
+        "weekly_pnl": state.pnl,
+        "remaining_budget": {
+            "trades_today": state.total_trades,
+            "context_trades": 0,
+        },
+        "limits": {
+            "daily_loss_limit": 500,
+            "weekly_loss_limit": 1500,
+            "max_trades_per_day": 10,
+        },
+    }
+
+
+@app.get("/api/operator")
+async def get_operator_state():
+    """Compatibility endpoint for the Operator page."""
+    return wrap_legacy_response(_operator_snapshot())
+
+
+@app.get("/api/incident-state")
+async def get_incident_state_compat():
+    """Compatibility endpoint for incident widgets/pages."""
+    return wrap_legacy_response(_incident_snapshot())
+
+
+@app.get("/api/v11/risk/state")
+async def get_v11_risk_state():
+    """Compatibility endpoint for v11 risk/context/health dashboard views."""
+    return wrap_legacy_response(_risk_state_snapshot(), DataSourceTag.DERIVED)
+
+
+@app.get("/api/v11/decisions")
+async def get_v11_decisions(limit: int = 50):
+    """Compatibility endpoint for v11 decision pages."""
+    decisions = state.recent_decisions[-limit:]
+    return wrap_legacy_response({
+        "decisions": decisions,
+        "count": len(decisions),
+        "decisions_today": state.decisions_today,
+        "rejections_today": state.rejections_today,
+    }, DataSourceTag.DERIVED)
+
+
+@app.get("/api/drift")
+async def get_drift_state():
+    """Return empty drift state until drift monitor records real divergences."""
+    return wrap_legacy_response({
+        "metrics": {
+            "total_divergences": 0,
+            "max_divergence_score": 0,
+            "last_check": datetime.now().isoformat(),
+        },
+        "alerts": [],
+    }, DataSourceTag.DERIVED)
+
+
+@app.get("/api/settings")
+async def get_settings():
+    """Settings endpoint consumed by the Next.js settings page."""
+    return wrap_legacy_response({
+        "trading_mode": state.mode,
+        "exchange": "Binance",
+        "api_connected": state.connection_status == "connected",
+        "latency_ms": abs(state.timestamp_offset_ms) if state.timestamp_offset_ms else None,
+        "testnet": state.environment != "live",
+        "risk": {
+            "daily_loss_limit": 500,
+            "weekly_loss_limit": 1500,
+            "max_drawdown": 10,
+            "max_positions": 5,
+            "max_exposure": state.initial_capital or 10000,
+            "trades_per_day": 10,
+            "trades_per_context": 3,
+            "losses_per_bias": 2,
+        },
+    })
+
+
+@app.get("/api/replay/sessions")
+async def get_replay_sessions(exchange_account_id: Optional[str] = None):
+    """Replay is opt-in; return empty sessions when none are recorded."""
+    return wrap_legacy_response({
+        "exchange_account_id": exchange_account_id,
+        "sessions": [],
+    }, DataSourceTag.DERIVED)
+
+
+@app.get("/api/replay/session/{session_id}")
+async def get_replay_session(session_id: str, exchange_account_id: Optional[str] = None):
+    """Replay session details compatibility endpoint."""
+    return wrap_legacy_response({
+        "session_id": session_id,
+        "exchange_account_id": exchange_account_id,
+        "decisions": [],
+    }, DataSourceTag.DERIVED)
+
+
+class StrategyToggleRequest(BaseModel):
+    strategy: str
+
+
+@app.post("/api/strategy/enable")
+async def enable_strategy(request: StrategyToggleRequest):
+    """Compatibility no-op for legacy strategy control UI."""
+    return wrap_legacy_response({
+        "success": True,
+        "strategy": request.strategy,
+        "enabled": True,
+    })
+
+
+@app.post("/api/strategy/disable")
+async def disable_strategy(request: StrategyToggleRequest):
+    """Compatibility no-op for legacy strategy control UI."""
+    return wrap_legacy_response({
+        "success": True,
+        "strategy": request.strategy,
+        "enabled": False,
+    })
+
+
+@app.post("/api/mode/live")
+async def switch_mode_live():
+    """Legacy mode switch endpoint used by the frontend."""
+    state.mode = "live"
+    state.environment = "live"
+    return wrap_legacy_response({"success": True, "mode": state.mode})
+
+
+@app.post("/api/mode/testnet")
+async def switch_mode_testnet():
+    """Legacy mode switch endpoint used by the frontend."""
+    state.mode = "testnet"
+    state.environment = "testnet"
+    return wrap_legacy_response({"success": True, "mode": state.mode})
+
+
 @app.get("/api/trades")
 async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
     """
     Get recent trades.
-    
+
     CRYPTOBOSS 2.0: Uses SQLite repository with ownership filtering.
     CRITICAL: Always filters by user_id AND exchange_account_id.
     New accounts = EMPTY trades array.
@@ -1814,10 +2177,10 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
     try:
         from src.core.database.repository import get_repository
         repo = get_repository()
-        
+
         # Get active account ID
         active_account_id = repo.get_active_account_id(user.user_id)
-        
+
         if not active_account_id:
             # No active account - return empty
             return wrap_response({
@@ -1828,10 +2191,10 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
                 "exchange_account_id": None,
                 "message": "No active account selected"
             })
-        
+
         # Get trades from SQLite - ALWAYS filtered by ownership
         trades = repo.get_trades(user.user_id, active_account_id, limit=limit)
-        
+
         return wrap_response({
             "trades": trades,
             "count": len(trades),
@@ -1839,10 +2202,10 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
             "user_id": user.user_id,
             "exchange_account_id": active_account_id
         })
-        
+
     except Exception as e:
         logger.error(f"Failed to get trades: {e}")
-        
+
         # Fallback to bot instance if SQLite fails
         if BOT_INSTANCE_AVAILABLE:
             bot = get_active_bot()
@@ -1853,7 +2216,7 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
                     "count": len(trades),
                     "is_new_account": len(bot.trading_state.trade_history) == 0
                 })
-        
+
         # Ultimate fallback - empty
         return wrap_response({
             "trades": [],
@@ -1864,90 +2227,150 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
 
 
 @app.get("/api/pnl/history")
-async def get_pnl_history():
+async def get_pnl_history(limit: int = 200):
     """
-    Get cumulative P/L history for the PLGraph component.
-    
-    Returns points array sorted by time with running total.
-    Uses in-memory trades from state (works with both SQLite and legacy fallback).
+    Cumulative P/L time series for the Overview P/L graph.
+    Builds running total from closed trades ordered by time.
+    Returns empty array for new accounts — not an error.
     """
-    closed_trades = [t for t in state.trades if t.get("side") == "SELL" and t.get("pnl") is not None]
-    
-    if not closed_trades:
-        return wrap_response({
+    trades = []
+
+    # Try database first
+    try:
+        from src.core.database.repository import get_repository
+        repo = get_repository()
+        # Need a user context; fall back gracefully if auth not in play
+        if hasattr(state, 'active_user_id') and state.active_user_id:
+            active_account_id = repo.get_active_account_id(state.active_user_id)
+            if active_account_id:
+                trades = repo.get_trades(state.active_user_id, active_account_id, limit=limit)
+    except Exception as e:
+        logger.debug(f"DB pnl/history fallback to in-memory trades: {e}")
+
+    # Fallback to bot instance
+    if not trades and BOT_INSTANCE_AVAILABLE:
+        bot = get_active_bot()
+        if bot:
+            raw = bot.trading_state.trade_history[-limit:]
+            trades = [
+                {
+                    "pnl": t.get("net_pnl", t.get("pnl", 0)),
+                    "symbol": t.get("symbol", "BTC/USDT"),
+                    "closed_at": t.get("closed_at", t.get("time", "")),
+                    "side": t.get("side", ""),
+                }
+                for t in raw
+            ]
+
+    # Fallback to in-memory state trades
+    if not trades:
+        trades = [
+            {
+                "pnl": t.get("pnl", 0),
+                "symbol": t.get("symbol", "BTC/USDT"),
+                "closed_at": t.get("time", ""),
+                "side": t.get("side", ""),
+            }
+            for t in state.trades[-limit:]
+            if t.get("pnl") is not None
+        ]
+
+    if not trades:
+        return {
             "points": [],
             "total_pnl": 0.0,
-            "win_rate": 0.0,
             "total_trades": 0,
-            "message": "No closed trades yet — P/L graph will populate as trades close"
-        })
-    
-    # Build cumulative P/L series
-    points = []
-    running_pnl = 0.0
-    wins = 0
-    losses = 0
-    
-    for trade in closed_trades:
-        pnl = float(trade.get("pnl", 0))
-        running_pnl += pnl
-        if pnl > 0:
+            "win_rate": 0.0,
+            "best_trade": 0.0,
+            "worst_trade": 0.0,
+        }
+
+    cumulative, points, wins = 0.0, [], 0
+    best, worst = 0.0, 0.0
+    for t in trades:
+        trade_pnl = float(t.get("pnl", t.get("net_pnl", 0)) or 0)
+        cumulative += trade_pnl
+        if trade_pnl > 0:
             wins += 1
-        elif pnl < 0:
-            losses += 1
-        
+        if trade_pnl > best:
+            best = trade_pnl
+        if trade_pnl < worst:
+            worst = trade_pnl
         points.append({
-            "time": trade.get("time", datetime.now().isoformat()),
-            "pnl": round(running_pnl, 4),
-            "trade_pnl": round(pnl, 4),
-            "symbol": trade.get("symbol", "BTC/USDT"),
+            "time": t.get("closed_at", t.get("time", "")),
+            "pnl": round(cumulative, 4),
+            "trade_pnl": round(trade_pnl, 4),
+            "symbol": t.get("symbol", ""),
         })
-    
-    total_closed = wins + losses
-    win_rate = (wins / total_closed * 100) if total_closed > 0 else 0.0
-    
-    return wrap_response({
+
+    total = len(trades)
+    return {
         "points": points,
-        "total_pnl": round(running_pnl, 4),
-        "win_rate": round(win_rate, 1),
-        "total_trades": total_closed,
-        "wins": wins,
-        "losses": losses,
-    })
+        "total_pnl": round(cumulative, 4),
+        "total_trades": total,
+        "win_rate": round(wins / total * 100, 2) if total > 0 else 0.0,
+        "best_trade": round(best, 4),
+        "worst_trade": round(worst, 4),
+    }
 
 
 @app.get("/api/strategies")
 async def get_strategies():
-    """Get active strategies."""
+    """Get all active strategies including AggressiveScalper if available."""
+    dca_enabled = True
     strategies = [
         {
             "id": "dca_btc_usdt",
+            "name": "DCA BTC/USDT",
             "type": "DCA",
             "symbol": "BTC/USDT",
             "status": "active",
+            "enabled": dca_enabled,
+            "healthScore": 1.0 if dca_enabled else 0.0,
+            "recentDecay": 0.0,
+            "wins": state.winning_trades,
+            "losses": state.losing_trades,
             "pnl": round(state.total_pnl, 2),
             "trades": state.total_trades,
             "win_rate": round(state.win_rate, 1),
-            "position": state.position
+            "performance": {
+                "win_rate": round(state.win_rate, 1),
+                "pnl": round(state.total_pnl, 2),
+                "trades": state.total_trades,
+            },
+            "position": state.position,
         }
     ]
-    
-    # Add AggressiveScalper if available
+
     if AGGRESSIVE_SCALPER_AVAILABLE and _aggressive_scalper_instance:
-        metrics = _aggressive_scalper_instance.get_metrics()
+        s = _aggressive_scalper_instance.get_status()
         strategies.append({
-            "id": "aggressive_scalper_v1",
+            "id": "aggressive_scalper",
+            "name": "Aggressive Scalper",
             "type": "AggressiveScalper",
-            "symbol": "BTC/USDT",
-            "status": "active" if state.api_validated else "waiting",
+            "symbol": "BTC/USDT, ETH/USDT, SOL/USDT",
+            "status": "halted" if s.get("halted") else ("active" if state.api_validated else "waiting"),
+            "enabled": not s.get("halted", False),
+            "healthScore": 0.0 if s.get("halted") else 0.75,
+            "recentDecay": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "leverage": s.get("leverage", 15),
+            "stop_loss_pct": s.get("stop_loss_pct", 0.4),
+            "take_profit_pct": s.get("take_profit_pct", 1.2),
+            "daily_loss_pct": s.get("daily_loss_pct", 0),
+            "trades_last_hour": s.get("trades_last_hour", 0),
             "pnl": 0,
-            "trades": metrics.get("signals_generated", 0),
+            "trades": s.get("trades_last_hour", 0),
             "win_rate": 0,
-            "position": 0,
-            "confidence_threshold": 0.6,
+            "performance": {
+                "win_rate": 0,
+                "pnl": 0,
+                "trades": s.get("trades_last_hour", 0),
+            },
         })
-    
-    return {"strategies": strategies}
+
+    return wrap_legacy_response({"strategies": strategies})
 
 
 @app.get("/api/scalper/aggressive/status")
@@ -2583,13 +3006,13 @@ async def start_engine(config: EngineConfig):
     state.winning_trades = 0
     state.losing_trades = 0
     state.start_time = datetime.now()
-    
+
     await manager.broadcast({
         "type": "engine_status",
         "status": "started",
         "mode": config.mode
     })
-    
+
     return {"status": "started", "mode": config.mode}
 
 
@@ -2612,7 +3035,7 @@ async def emergency_stop():
         pnl = (state.current_price - state.position_entry_price) * state.position
         state.pnl += pnl
         state.capital += proceeds
-        
+
         trade = {
             "id": len(state.trades) + 1,
             "time": datetime.now().isoformat(),
@@ -2625,14 +3048,14 @@ async def emergency_stop():
         }
         state.trades.append(trade)
         state.position = 0
-        
+
         await manager.broadcast({"type": "trade", **trade})
-    
+
     await manager.broadcast({
         "type": "emergency",
         "message": "Emergency stop activated - all positions closed"
     })
-    
+
     return {"status": "emergency_stop_activated", "positions_closed": True}
 
 
@@ -2640,22 +3063,22 @@ async def emergency_stop():
 
 class OperatorActionRequest(BaseModel):
     reason: str  # Mandatory per specification
-    
+
 
 @app.post("/api/operator/pause")
 async def pause_trading(request: OperatorActionRequest):
     """
     Pause all trading activity.
-    
+
     CryptoBoss 1.0.0: Reason is mandatory. Action permanently logged.
     Operator cannot bypass risk or capital veto.
     """
     if not request.reason or len(request.reason.strip()) < 5:
         raise HTTPException(status_code=400, detail="Reason must be at least 5 characters")
-    
+
     state.trading_paused = True
     state.trading_pause_reason = request.reason
-    
+
     # Permanent log
     action_log = {
         "action": "PAUSE_TRADING",
@@ -2665,15 +3088,15 @@ async def pause_trading(request: OperatorActionRequest):
         "previous_state": "active"
     }
     state.operator_action_log.append(action_log)
-    
+
     await manager.broadcast({
         "type": "operator_action",
         "action": "pause",
         "reason": request.reason
     })
-    
+
     logger.warning(f"⏸️ TRADING PAUSED by operator: {request.reason}")
-    
+
     return wrap_response({
         "success": True,
         "action": "pause_trading",
@@ -2687,22 +3110,22 @@ async def pause_trading(request: OperatorActionRequest):
 async def resume_trading(request: OperatorActionRequest):
     """
     Resume trading activity.
-    
+
     CryptoBoss 1.0.0: Reason is mandatory. Cannot resume during INCIDENT_FREEZE.
     """
     if not request.reason or len(request.reason.strip()) < 5:
         raise HTTPException(status_code=400, detail="Reason must be at least 5 characters")
-    
+
     # Cannot resume if in incident freeze
     if state.incident_state == "INCIDENT_FREEZE":
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail="Cannot resume trading during INCIDENT_FREEZE. Must acknowledge incident first."
         )
-    
+
     state.trading_paused = False
     state.trading_pause_reason = None
-    
+
     action_log = {
         "action": "RESUME_TRADING",
         "reason": request.reason,
@@ -2711,15 +3134,15 @@ async def resume_trading(request: OperatorActionRequest):
         "previous_state": "paused"
     }
     state.operator_action_log.append(action_log)
-    
+
     await manager.broadcast({
         "type": "operator_action",
         "action": "resume",
         "reason": request.reason
     })
-    
+
     logger.warning(f"▶️ TRADING RESUMED by operator: {request.reason}")
-    
+
     return wrap_response({
         "success": True,
         "action": "resume_trading",
@@ -2733,24 +3156,24 @@ async def resume_trading(request: OperatorActionRequest):
 async def acknowledge_incident(request: OperatorActionRequest):
     """
     Acknowledge and clear an incident state.
-    
+
     CryptoBoss 1.0.0: Manual operator acknowledgement required to exit incident state.
     Reason is permanently logged.
     """
     if not request.reason or len(request.reason.strip()) < 5:
         raise HTTPException(status_code=400, detail="Reason must be at least 5 characters")
-    
+
     if state.incident_state == "NORMAL":
         raise HTTPException(status_code=400, detail="No incident to acknowledge")
-    
+
     previous_state = state.incident_state
     previous_reason = state.incident_reason
-    
+
     # Clear incident
     state.incident_state = "NORMAL"
     state.incident_reason = None
     state.incident_started_at = None
-    
+
     action_log = {
         "action": "ACKNOWLEDGE_INCIDENT",
         "reason": request.reason,
@@ -2760,15 +3183,15 @@ async def acknowledge_incident(request: OperatorActionRequest):
         "previous_incident_reason": previous_reason
     }
     state.operator_action_log.append(action_log)
-    
+
     await manager.broadcast({
         "type": "incident_acknowledged",
         "previous_state": previous_state,
         "reason": request.reason
     })
-    
+
     logger.warning(f"✅ INCIDENT ACKNOWLEDGED by operator: {request.reason} (was: {previous_state})")
-    
+
     return wrap_response({
         "success": True,
         "action": "acknowledge_incident",
@@ -2783,7 +3206,7 @@ async def acknowledge_incident(request: OperatorActionRequest):
 async def get_operator_actions(limit: int = 100):
     """
     Get operator action log.
-    
+
     CryptoBoss 1.0.0: All operator actions are permanently logged.
     """
     return wrap_response({
@@ -2798,16 +3221,10 @@ async def get_operator_actions(limit: int = 100):
 async def get_incident_state():
     """
     Get current incident state.
-    
+
     CryptoBoss 1.0.0: Incident states - NORMAL, DEGRADED, INCIDENT_FREEZE, HALTED
     """
-    return wrap_response({
-        "state": state.incident_state,
-        "reason": state.incident_reason,
-        "started_at": state.incident_started_at.isoformat() if state.incident_started_at else None,
-        "trading_allowed": state.incident_state == "NORMAL" and not state.trading_paused,
-        "position_reduction_only": state.incident_state == "INCIDENT_FREEZE"
-    })
+    return wrap_legacy_response(_incident_snapshot())
 
 
 # === WebSocket ===
@@ -2815,7 +3232,7 @@ async def get_incident_state():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
-    
+
     # Send initial state
     await websocket.send_json({
         "type": "init",
@@ -2823,12 +3240,12 @@ async def websocket_endpoint(websocket: WebSocket):
         "portfolio": await get_portfolio(),
         "trades": state.trades[-10:]
     })
-    
+
     try:
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            
+
             if message.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif message.get("type") == "refresh":
@@ -2837,9 +3254,34 @@ async def websocket_endpoint(websocket: WebSocket):
                     "status": await get_status(),
                     "portfolio": await get_portfolio()
                 })
-            
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+@app.websocket("/ws/v11/stream")
+async def websocket_v11_stream(websocket: WebSocket):
+    """Compatibility decision stream for the Next.js decision component."""
+    await websocket.accept()
+    try:
+        await websocket.send_json({
+            "type": "init",
+            "decisions": state.recent_decisions[-50:],
+            "timestamp": datetime.now().isoformat(),
+        })
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                message = json.loads(data)
+                if message.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except asyncio.TimeoutError:
+                await websocket.send_json({
+                    "type": "heartbeat",
+                    "timestamp": datetime.now().isoformat(),
+                })
+    except WebSocketDisconnect:
+        pass
 
 
 # === WebSocket Prices (vFINAL) ===
@@ -2852,7 +3294,7 @@ price_clients: List[WebSocket] = []
 async def websocket_prices(websocket: WebSocket):
     """
     Real-time price feed WebSocket.
-    
+
     CRYPTOBOSS vFINAL: Prices from Binance WebSocket.
     - Uses MAINNET for prices (testnet has no real data)
     - Auto-pushes updates to all connected clients
@@ -2860,39 +3302,42 @@ async def websocket_prices(websocket: WebSocket):
     """
     await websocket.accept()
     price_clients.append(websocket)
-    
+
     try:
-        # Send current prices immediately
+        # Determine source label matching frontend expectations
+        source_label = "LIVE" if env_signature.mode == "live" else "TESTNET"
+
+        # Send current prices as individual 'price' messages the frontend can parse
         if MARKET_DATA_AVAILABLE:
             service = get_market_data_service()
-            prices = {symbol: tick.to_dict() for symbol, tick in service.get_all_prices().items()}
-            await websocket.send_json({
-                "type": "init",
-                "prices": prices,
-                "connected": service.is_connected,
-                "timestamp": datetime.now().isoformat()
-            })
-        else:
-            await websocket.send_json({
-                "type": "init",
-                "prices": {},
-                "connected": False,
-                "error": "Market data service not available",
-                "timestamp": datetime.now().isoformat()
-            })
-        
+            all_prices = service.get_all_prices()
+
+            for symbol, tick in all_prices.items():
+                if tick and tick.price > 0:
+                    await websocket.send_json({
+                        "type": "price",
+                        "symbol": tick.symbol,
+                        "price": tick.price,
+                        "source": source_label,
+                        "timestamp": int(datetime.now().timestamp() * 1000),
+                        "change24h": tick.change_24h,
+                        "high24h": tick.high_24h,
+                        "low24h": tick.low_24h,
+                        "volume24h": tick.volume_24h,
+                    })
+
         # Keep connection alive and handle client messages
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 message = json.loads(data)
-                
+
                 if message.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
             except asyncio.TimeoutError:
                 # Send heartbeat
                 await websocket.send_json({"type": "heartbeat", "timestamp": datetime.now().isoformat()})
-                
+
     except WebSocketDisconnect:
         pass
     finally:
@@ -2906,26 +3351,47 @@ async def broadcast_price_update(tick: PriceTick):
     if tick.symbol in ("BTC/USDT", "BTCUSDT"):
         state.current_price = tick.price
         state.last_price = tick.price
-    
+
+    # Also update price_history for chart data
+    state.price_history.append({
+        "time": datetime.now().isoformat(),
+        "price": tick.price,
+        "symbol": tick.symbol
+    })
+    # Keep price history bounded
+    if len(state.price_history) > 2000:
+        state.price_history = state.price_history[-1500:]
+
     if not price_clients:
         return
-        
+
+    # Determine source label matching frontend expectations
+    source_label = "LIVE" if env_signature.mode == "live" else "TESTNET"
+
+    # Send FLAT format that the frontend usePriceSocket hook expects directly
     message = {
         "type": "price",
         "symbol": tick.symbol,
-        "data": tick.to_dict()
+        "price": tick.price,
+        "source": source_label,
+        "timestamp": int(datetime.now().timestamp() * 1000),
+        "change24h": tick.change_24h,
+        "high24h": tick.high_24h,
+        "low24h": tick.low_24h,
+        "volume24h": tick.volume_24h,
     }
-    
+
     disconnected = []
     for client in price_clients:
         try:
             await client.send_json(message)
         except Exception:
             disconnected.append(client)
-    
+
     # Clean up disconnected clients
     for client in disconnected:
-        price_clients.remove(client)
+        if client in price_clients:
+            price_clients.remove(client)
 
 
 # === Background Tasks ===
@@ -2944,25 +3410,25 @@ async def real_trading_loop():
     """
     SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     LOOP_INTERVAL = 30  # seconds between signal checks
-    
+
     logger.info("Real trading loop starting...")
-    
+
     while True:
         try:
             # Only run if exchange client is connected
             if state.exchange_client is None or not state.api_validated:
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
-            
+
             if state.kill_switch_active:
                 logger.info("Kill switch active — trading loop paused")
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
-            
+
             if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
-            
+
             # Fetch balance
             try:
                 balance = await state.exchange_client.get_balance()
@@ -2979,7 +3445,7 @@ async def real_trading_loop():
                 logger.error(f"Balance fetch failed: {e}")
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
-            
+
             # Run strategy on each symbol
             for symbol in SYMBOLS:
                 try:
@@ -2989,33 +3455,33 @@ async def real_trading_loop():
                         continue
                     df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     current_price = float(df["close"].iloc[-1])
-                    
+
                     # Update state price
                     if symbol == "BTC/USDT":
                         state.current_price = current_price
-                    
+
                     # Set strategy symbol and generate signal
                     _aggressive_scalper_instance.config.symbol = symbol
                     signal = _aggressive_scalper_instance.generate_signal(
                         df, len(df) - 1, current_price
                     )
-                    
+
                     if signal.action in ("BUY", "SELL") and signal.confidence >= 0.6:
                         # Calculate order size
                         position_usdt = usdt_free * 0.08  # 8% of free capital
-                        
+
                         if position_usdt < 10:
                             continue
-                        
+
                         side = "buy" if signal.action == "BUY" else "sell"
                         quantity = position_usdt / current_price
-                        
+
                         logger.info(
                             f"SIGNAL: {signal.action} {symbol} @ {current_price:.4f} | "
                             f"qty={quantity:.6f} | confidence={signal.confidence:.2f} | "
                             f"SL={signal.stop_loss:.4f} TP={signal.take_profit:.4f}"
                         )
-                        
+
                         # Place real order
                         try:
                             order = await state.exchange_client.create_order(
@@ -3024,9 +3490,9 @@ async def real_trading_loop():
                                 order_type="market",
                                 amount=round(quantity, 6),
                             )
-                            
+
                             logger.info(f"Order placed: {order}")
-                            
+
                             # Record trade
                             state.total_trades += 1
                             trade_record = {
@@ -3042,22 +3508,22 @@ async def real_trading_loop():
                                 "confidence": signal.confidence,
                             }
                             state.trades.append(trade_record)
-                            
+
                             # Broadcast to WebSocket clients
                             await manager.broadcast({
                                 "type": "trade",
                                 **trade_record,
                             })
-                            
+
                         except Exception as order_error:
                             logger.error(f"Order placement failed for {symbol}: {order_error}")
 
                 except Exception as symbol_error:
                     logger.error(f"Error processing {symbol}: {symbol_error}")
                     continue
-            
+
             await asyncio.sleep(LOOP_INTERVAL)
-            
+
         except asyncio.CancelledError:
             logger.info("Real trading loop cancelled")
             break

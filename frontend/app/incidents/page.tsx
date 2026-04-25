@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -58,9 +59,10 @@ export default function IncidentsPage() {
             });
 
             if (!response.ok) throw new Error('Failed to fetch incident data');
-            const data = await response.json();
-            setSnapshot(data.data || emptySnapshot);
-            setTimeline(data.data?.timeline || []);
+            const payload = await response.json();
+            const data: any = unwrapApiData(payload);
+            setSnapshot(data || emptySnapshot);
+            setTimeline(data?.timeline || []);
             setError(null);
         } catch (e: any) {
             console.error('Incidents fetch error:', e);

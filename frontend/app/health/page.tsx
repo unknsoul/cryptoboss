@@ -11,6 +11,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -87,7 +88,8 @@ export default function ExecutionHealthPage() {
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
                 if (res.ok) {
-                    const data = await res.json();
+                    const payload = await res.json();
+                    const data: any = unwrapApiData(payload);
                     // Map backend response to HealthData shape
                     setHealthData({
                         exchange: {

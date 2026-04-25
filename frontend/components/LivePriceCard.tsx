@@ -88,15 +88,19 @@ export function LivePriceCard({ symbol, showDetails = true, className = '' }: Li
         if (!priceData) return null;
 
         const source = priceData.source;
-        const badgeClass = source === 'LIVE'
+        const isLive = source === 'LIVE' || source === 'BINANCE_MAINNET' || source === 'BINANCE_WEBSOCKET';
+        const isTestnet = source === 'TESTNET';
+        const badgeClass = isLive
             ? 'badge-success'
-            : source === 'TESTNET'
+            : isTestnet
                 ? 'badge-warning'
                 : 'badge-neutral';
 
+        const displayLabel = isLive ? 'LIVE' : isTestnet ? 'TESTNET' : source;
+
         return (
             <span className={`badge ${badgeClass} text-xs`}>
-                {source}
+                {displayLabel}
             </span>
         );
     };

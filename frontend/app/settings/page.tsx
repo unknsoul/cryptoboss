@@ -15,6 +15,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { unwrapApiData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -55,7 +56,8 @@ export default function SettingsPage() {
             });
 
             if (response.ok) {
-                const data = await response.json();
+                const payload = await response.json();
+                const data: any = unwrapApiData(payload);
                 setSettings({
                     tradingMode: data.trading_mode || 'testnet',
                     apiConnection: {
@@ -102,13 +104,19 @@ export default function SettingsPage() {
         setShowModeConfirm(false);
     };
 
-    const handleKillSwitch = () => {
+    const handleKillSwitch = async () => {
         if (killSwitchStep === 0) {
             setKillSwitchStep(1);
         } else if (killSwitchStep === 1) {
             setKillSwitchStep(2);
-            // Activate kill switch
-            console.log('KILL SWITCH ACTIVATED');
+            try {
+                await fetch(`${API_URL}/api/kill-switch?active=true&reason=Manual%20activation%20from%20settings`, {
+                    method: 'POST',
+                    headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+                });
+            } catch (e) {
+                console.error('Failed to activate kill switch:', e);
+            }
             setTimeout(() => setKillSwitchStep(0), 5000);
         }
     };
