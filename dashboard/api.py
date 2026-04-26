@@ -28,7 +28,7 @@ import pandas as pd
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -798,6 +798,52 @@ def _resolved_engine_status() -> str:
     if state.api_validated and state.exchange_client is not None:
         return state.engine_status
     return "stopped"
+
+
+def _resolve_runtime_engine() -> Optional[Any]:
+    """Best-effort lookup for the active trading engine instance."""
+    if BOT_INSTANCE_AVAILABLE:
+        bot = get_active_bot()
+        engine = getattr(bot, "engine", None) if bot is not None else None
+        if engine is not None:
+            return engine
+
+    if ENGINE_LIFECYCLE_AVAILABLE:
+        lifecycle = get_engine_lifecycle()
+        engine = getattr(lifecycle, "engine", None)
+        if engine is not None:
+            return engine
+
+    return None
+
+
+def _resolve_aggressive_scalper() -> Optional[Any]:
+    """Return the live aggressive scalper instance when available."""
+    engine = _resolve_runtime_engine()
+    if engine is not None and hasattr(engine, "get_strategy"):
+        strategy = engine.get_strategy("aggressive_scalper_v1")
+        if strategy is not None:
+            return strategy
+    return _aggressive_scalper_instance
+
+
+def _sync_aggressive_scalper_runtime(balance_hint: Optional[float] = None) -> Optional[Any]:
+    """Refresh runtime account and PnL inputs on the aggressive scalper instance."""
+    strategy = _resolve_aggressive_scalper()
+    if strategy is None:
+        return None
+
+    balance = balance_hint
+    if balance is None or balance <= 0:
+        balance = state.capital or state.initial_capital or 10000.0
+
+    if hasattr(strategy, "set_account_balance"):
+        strategy.set_account_balance(float(balance))
+    if hasattr(strategy, "set_daily_pnl"):
+        strategy.set_daily_pnl(float(state.pnl))
+    if hasattr(strategy, "set_weekly_pnl"):
+        strategy.set_weekly_pnl(float(state.total_pnl))
+    return strategy
 
 
 async def _attach_exchange_client_for_account(user_id: str, account: ExchangeAccount) -> Dict[str, Any]:
@@ -2306,8 +2352,15 @@ async def get_risk():
 
 
 @app.post("/api/kill-switch")
-async def toggle_kill_switch(active: bool = True, reason: str = "Manual activation"):
+async def toggle_kill_switch(
+    active: bool = True,
+    reason: str = "Manual activation",
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+):
     """Toggle the kill switch."""
+    if payload:
+        active = bool(payload.get("active", active))
+        reason = str(payload.get("reason", reason))
     state.kill_switch_active = active
     state.kill_switch_reason = reason if active else None
     state.operator_action_log.append({
@@ -2940,25 +2993,39 @@ async def get_replay_session(session_id: str, exchange_account_id: Optional[str]
 
 
 class StrategyToggleRequest(BaseModel):
-    strategy: str
+    strategy: Optional[str] = None
+    id: Optional[str] = None
+
+    @property
+    def target(self) -> str:
+        """Return the requested strategy identifier or display name."""
+        return (self.id or self.strategy or "").strip()
 
 
 @app.post("/api/strategy/enable")
 async def enable_strategy(request: StrategyToggleRequest):
-    """Compatibility no-op for legacy strategy control UI."""
+    """Compatibility endpoint that toggles known strategy runtimes."""
+    target = request.target
+    strategy = _sync_aggressive_scalper_runtime()
+    if target in {"aggressive_scalper", "aggressive_scalper_v1", "Aggressive Scalper"} and strategy is not None:
+        strategy.config.enabled = True
     return wrap_legacy_response({
         "success": True,
-        "strategy": request.strategy,
+        "strategy": target,
         "enabled": True,
     })
 
 
 @app.post("/api/strategy/disable")
 async def disable_strategy(request: StrategyToggleRequest):
-    """Compatibility no-op for legacy strategy control UI."""
+    """Compatibility endpoint that toggles known strategy runtimes."""
+    target = request.target
+    strategy = _sync_aggressive_scalper_runtime()
+    if target in {"aggressive_scalper", "aggressive_scalper_v1", "Aggressive Scalper"} and strategy is not None:
+        strategy.config.enabled = False
     return wrap_legacy_response({
         "success": True,
-        "strategy": request.strategy,
+        "strategy": target,
         "enabled": False,
     })
 
@@ -3014,7 +3081,8 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
             "count": len(trades),
             "is_new_account": len(trades) == 0,
             "user_id": user.user_id,
-            "exchange_account_id": active_account_id
+            "exchange_account_id": active_account_id,
+            "message": "No trades yet. Start the engine and wait for signals." if len(trades) == 0 else None,
         })
 
     except Exception as e:
@@ -3028,7 +3096,8 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
                 return wrap_response({
                     "trades": trades,
                     "count": len(trades),
-                    "is_new_account": len(bot.trading_state.trade_history) == 0
+                    "is_new_account": len(bot.trading_state.trade_history) == 0,
+                    "message": "No trades yet. Start the engine and wait for signals." if len(trades) == 0 else None,
                 })
 
         # Ultimate fallback - empty
@@ -3036,6 +3105,7 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
             "trades": [],
             "count": 0,
             "is_new_account": True,
+            "message": "No trades yet. Start the engine and wait for signals.",
             "error": str(e)
         })
 
@@ -3156,22 +3226,23 @@ async def get_strategies():
         }
     ]
 
-    if AGGRESSIVE_SCALPER_AVAILABLE and _aggressive_scalper_instance:
-        s = _aggressive_scalper_instance.get_status()
+    aggressive_scalper = _sync_aggressive_scalper_runtime()
+    if AGGRESSIVE_SCALPER_AVAILABLE and aggressive_scalper:
+        s = aggressive_scalper.get_status()
         strategies.append({
-            "id": "aggressive_scalper",
+            "id": "aggressive_scalper_v1",
             "name": "Aggressive Scalper",
             "type": "AggressiveScalper",
-            "symbol": "BTC/USDT, ETH/USDT, SOL/USDT",
-            "status": "halted" if s.get("halted") else ("active" if state.api_validated else "waiting"),
-            "enabled": not s.get("halted", False),
+            "symbol": ", ".join(aggressive_scalper.config.metadata.get("symbols", ["BTC/USDT"])),
+            "status": "halted" if s.get("halted") else ("active" if aggressive_scalper.config.enabled else "disabled"),
+            "enabled": aggressive_scalper.config.enabled and not s.get("halted", False),
             "healthScore": 0.0 if s.get("halted") else 0.75,
             "recentDecay": 0.0,
             "wins": 0,
             "losses": 0,
-            "leverage": s.get("leverage", 15),
-            "stop_loss_pct": s.get("stop_loss_pct", 0.4),
-            "take_profit_pct": s.get("take_profit_pct", 1.2),
+            "leverage": s.get("leverage", 1),
+            "stop_loss_pct": s.get("stop_loss_atr_mult", 0.6),
+            "take_profit_pct": s.get("take_profit_2_mult", 2.8),
             "daily_loss_pct": s.get("daily_loss_pct", 0),
             "trades_last_hour": s.get("trades_last_hour", 0),
             "pnl": 0,
@@ -3190,9 +3261,10 @@ async def get_strategies():
 @app.get("/api/scalper/aggressive/status")
 async def get_aggressive_scalper_status():
     """Current status of the AggressiveScalper."""
-    if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
-        raise HTTPException(status_code=503, detail="AggressiveScalper not available")
-    return wrap_response(_aggressive_scalper_instance.get_status())
+    strategy = _sync_aggressive_scalper_runtime()
+    if not AGGRESSIVE_SCALPER_AVAILABLE or strategy is None:
+        return wrap_response({"status": "inactive"})
+    return wrap_response(strategy.get_status())
 
 
 
@@ -3301,10 +3373,18 @@ async def get_scalper_live(symbol: str = "BTC/USDT", account_balance: float = 10
     if not V12_AVAILABLE or v12_scalper is None:
         raise HTTPException(status_code=503, detail="v12 scalper module is unavailable")
 
+    effective_balance = state.capital or state.initial_capital or account_balance
     timeframes = [v12_scalper.bias_timeframe, v12_scalper.mid_timeframe, v12_scalper.entry_timeframe]
     data = await fetch_multi_tf_data(symbol=symbol, timeframes=timeframes, limit=400)
-    signal = v12_scalper.generate_multi_timeframe_signal(data=data, account_balance=account_balance)
+    signal = v12_scalper.generate_multi_timeframe_signal(data=data, account_balance=effective_balance)
     analysis = v12_scalper.analyze_current_market(data=data)
+    active_setups = v12_scalper.smc_engine.get_active_setups(
+        data=data,
+        timeframe=v12_scalper.entry_timeframe,
+        limit=5,
+    )
+    analysis["top_setups"] = [_serialize_setup(setup) for setup in active_setups]
+    analysis["setups_count"] = len(active_setups)
 
     return wrap_response(
         {
@@ -4359,7 +4439,6 @@ async def real_trading_loop():
     Fetches OHLCV data, runs strategies, executes real orders on Binance.
     Loops every 30 seconds.
     """
-    SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     LOOP_INTERVAL = 30  # seconds between signal checks
 
     logger.info("Real trading loop starting...")
@@ -4385,7 +4464,8 @@ async def real_trading_loop():
             if state.engine_status != "running":
                 _set_engine_status("running")
 
-            if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
+            strategy = _sync_aggressive_scalper_runtime()
+            if not AGGRESSIVE_SCALPER_AVAILABLE or strategy is None:
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
 
@@ -4397,6 +4477,7 @@ async def real_trading_loop():
                     if k == "USDT":
                         usdt_free = v if isinstance(v, (int, float)) else v.get("free", 0)
                         break
+                strategy = _sync_aggressive_scalper_runtime(float(usdt_free))
                 if usdt_free < 10:
                     logger.warning(f"Insufficient USDT balance: ${usdt_free:.2f} — skipping cycle")
                     await asyncio.sleep(LOOP_INTERVAL)
@@ -4406,11 +4487,14 @@ async def real_trading_loop():
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
 
+            symbols = strategy.config.metadata.get("symbols", ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+            timeframe = strategy.config.metadata.get("timeframe", "5m")
+
             # Run strategy on each symbol
-            for symbol in SYMBOLS:
+            for symbol in symbols:
                 try:
                     # Get OHLCV candles
-                    candles = await state.exchange_client.get_ohlcv(symbol, timeframe="5m", limit=100)
+                    candles = await state.exchange_client.get_ohlcv(symbol, timeframe=timeframe, limit=100)
                     if not candles:
                         continue
                     df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -4421,25 +4505,22 @@ async def real_trading_loop():
                         state.current_price = current_price
 
                     # Set strategy symbol and generate signal
-                    _aggressive_scalper_instance.config.symbol = symbol
-                    signal = _aggressive_scalper_instance.generate_signal(
+                    strategy.config.symbol = symbol
+                    signal = strategy.generate_signal(
                         df, len(df) - 1, current_price
                     )
 
                     if signal.action in ("BUY", "SELL") and signal.confidence >= 0.6:
-                        # Calculate order size
-                        position_usdt = usdt_free * 0.08  # 8% of free capital
-
-                        if position_usdt < 10:
+                        quantity = float(signal.size or 0.0)
+                        if quantity <= 0 or quantity * current_price < 10:
                             continue
 
                         side = "buy" if signal.action == "BUY" else "sell"
-                        quantity = position_usdt / current_price
 
                         logger.info(
                             f"SIGNAL: {signal.action} {symbol} @ {current_price:.4f} | "
                             f"qty={quantity:.6f} | confidence={signal.confidence:.2f} | "
-                            f"SL={signal.stop_loss:.4f} TP={signal.take_profit:.4f}"
+                            f"SL={(signal.stop_loss or 0.0):.4f} TP={(signal.take_profit or 0.0):.4f}"
                         )
 
                         # Place real order

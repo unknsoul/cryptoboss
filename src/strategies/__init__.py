@@ -35,6 +35,7 @@ from .dca_strategy import DCAStrategy, DCADeal
 from .grid_strategy import GridTradingStrategy, GridConfig, GridLevel
 from .market_making import MarketMakingStrategy
 from .intraday_scalper import IntradayScalper
+from .aggressive_scalper import AggressiveScalper, ScalperParams
 from .strategy_builder import StrategyBuilder
 from .strategy_tester import StrategyTester
 from .session_manager_pro import SessionManagerPro, SessionWindow
@@ -68,6 +69,8 @@ __all__ = [
     'GridLevel',
     'MarketMakingStrategy',
     'IntradayScalper',
+    'AggressiveScalper',
+    'ScalperParams',
     'StrategyBuilder',
     'StrategyTester',
     'SMCTrendFollowStrategy',

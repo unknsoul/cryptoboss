@@ -116,6 +116,7 @@ export default function PositionsPage() {
     const { activeAccount, token } = useAuth();
     const [positions, setPositions] = useState<Position[]>([]);
     const [closedPositions, setClosedPositions] = useState<ClosedPosition[]>([]);
+    const [emptyMessage, setEmptyMessage] = useState('The system has no active positions. This is a normal state.');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -141,6 +142,7 @@ export default function PositionsPage() {
             // Backend returns empty array = new account with no positions
             setPositions(data.data?.positions || []);
             setClosedPositions(data.data?.closed_today || []);
+            setEmptyMessage(data.data?.message || 'The system has no active positions. This is a normal state.');
             setError(null);
         } catch (e: any) {
             console.error('Positions fetch error:', e);
@@ -154,6 +156,7 @@ export default function PositionsPage() {
     useEffect(() => {
         setPositions([]);
         setClosedPositions([]);
+        setEmptyMessage('The system has no active positions. This is a normal state.');
         setLoading(true);
         fetchPositions();
     }, [activeAccount, fetchPositions]);
@@ -246,7 +249,7 @@ export default function PositionsPage() {
                                 <div className="text-5xl mb-4">📭</div>
                                 <div className="text-xl text-white mb-2">No Open Positions</div>
                                 <div className="text-gray-400">
-                                    The system has no active positions. This is a normal state.
+                                    {emptyMessage}
                                 </div>
                             </div>
                         )}

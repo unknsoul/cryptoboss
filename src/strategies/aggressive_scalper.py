@@ -330,8 +330,9 @@ class AggressiveScalper(BaseStrategy):
         diff = window.diff().dropna()
         if diff.empty:
             return 0
-        higher_lows = all(a <= b for a, b in zip(window[:-1], window[1:]))
-        lower_highs = all(a >= b for a, b in zip(window[:-1], window[1:]))
+        values = window.tolist()
+        higher_lows = all(a <= b for a, b in zip(values[:-1], values[1:]))
+        lower_highs = all(a >= b for a, b in zip(values[:-1], values[1:]))
         if higher_lows and diff.gt(0).sum() >= len(diff) * 0.7:
             return 1
         if lower_highs and diff.lt(0).sum() >= len(diff) * 0.7:
@@ -536,7 +537,7 @@ class AggressiveScalper(BaseStrategy):
                 now=now,
             )
 
-        if 4.0 <= dominant_score < 5.0:
+        if 4.0 <= dominant_score < 5.0 and adx_value >= self.params.adx_min_trend:
             metadata.update(
                 {
                     "status": "WATCH",

@@ -133,7 +133,7 @@ class PaperBroker(BaseBroker):
         self._open_orders: List[Dict] = []
         self._order_counter = 0
         self.slippage_pct = slippage_pct
-        self.slippage_bps = max(float(slippage_pct) * 100.0, 5.0)
+        self.slippage_bps = 5.0
         self.fee_rate = fee_rate
         self._prices: Dict[str, float] = {}
 

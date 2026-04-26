@@ -1,49 +1,66 @@
-# ─────────────────────────────────────────────────────────────
-# AggressiveScalper Configuration — CryptoBoss
-# ─────────────────────────────────────────────────────────────
-
 strategy:
   id: aggressive_scalper_v1
-  version: "1.0"
+  version: "2.0"
   type: AggressiveScalper
   enabled: true
 
-# ── Indicators ────────────────────────────────────────────────
 rsi:
-  period: 14
-  oversold: 30.0
-  overbought: 70.0
+  period: 7
+  fast_period: 4
+  oversold: 28
+  overbought: 72
 
 macd:
-  fast: 12
-  slow: 26
-  signal: 9
+  fast: 6
+  slow: 13
+  signal: 4
+
+ema:
+  fast: 8
+  slow: 21
+
+atr:
+  period: 10
 
 volume:
-  ma_period: 20
-  spike_threshold: 1.5   # must be >= 1.5x 20-bar average
+  ma_period: 14
+  spike_threshold: 1.4
 
 adx:
-  period: 14
-  min_trend: 20.0        # skip if ADX < 20 (choppy market)
+  period: 10
+  min_trend: 18
 
-# ── Risk Management ──────────────────────────────────────────
 risk:
-  stop_loss_pct: 0.4     # 0.4% stop loss
-  take_profit_pct: 1.2   # 1.2% take profit (3:1 R/R)
-  max_position_pct: 8.0  # 8% of capital per trade
-  leverage: 1            # spot trading (no margin for testnet)
+  stop_loss_atr_mult: 0.6
+  take_profit_1_mult: 1.5
+  take_profit_2_mult: 2.8
+  take_profit_3_mult: 4.2
+  max_position_pct: 8.0
+  max_risk_pct_per_trade: 0.01
+  leverage: 1
 
-# ── Safety Guards ────────────────────────────────────────────
+scaling:
+  auto_partial_close: true
+  partial_close_pct_at_tp1: 0.5
+  move_sl_to_be_at_tp1: true
+  trailing_stop_after_tp1: true
+  trailing_atr_mult: 1.0
+
 guards:
-  max_trades_per_hour: 8
-  daily_loss_halt_pct: 3.0
-  cooldown_seconds: 90
+  max_trades_per_hour: 15
+  max_concurrent_positions: 4
+  daily_loss_halt_pct: 4.0
+  weekly_loss_halt_pct: 8.0
+  cooldown_seconds: 45
+  min_confluence: 3
 
-# ── Symbols ──────────────────────────────────────────────────
 symbols:
   - BTC/USDT
   - ETH/USDT
   - SOL/USDT
+  - BNB/USDT
+  - XRP/USDT
+  - DOGE/USDT
 
-timeframe: "5m"
+timeframe: "1m"
+secondary_timeframe: "5m"
