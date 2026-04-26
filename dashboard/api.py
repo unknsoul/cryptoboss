@@ -4510,7 +4510,8 @@ async def real_trading_loop():
                         df, len(df) - 1, current_price
                     )
 
-                    if signal.action in ("BUY", "SELL") and signal.confidence >= 0.6:
+                    min_confidence = float(getattr(strategy.config, "min_confidence", 0.55) or 0.55)
+                    if signal.action in ("BUY", "SELL") and signal.confidence >= min_confidence:
                         quantity = float(signal.size or 0.0)
                         if quantity <= 0 or quantity * current_price < 10:
                             continue
