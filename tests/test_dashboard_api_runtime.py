@@ -1,3 +1,4 @@
+import asyncio
 import copy
 from unittest.mock import AsyncMock
 
@@ -23,7 +24,14 @@ def client(monkeypatch):
     original_task = dashboard_api._trading_loop_task
     original_heartbeat = dashboard_api.ROOT_WS_HEARTBEAT_SECONDS
     original_risk_settings = copy.deepcopy(dashboard_api.risk_settings)
+    original_log_entries = dashboard_api.live_log_stream.snapshot(limit=800)
     original_dependency_overrides = dict(dashboard_api.app.dependency_overrides)
+    original_runtime_telemetry = {
+        "last_api_roundtrip_ms": dashboard_api.runtime_telemetry.last_api_roundtrip_ms,
+        "last_api_request_at": dashboard_api.runtime_telemetry.last_api_request_at,
+        "last_websocket_heartbeat_at": dashboard_api.runtime_telemetry.last_websocket_heartbeat_at,
+        "last_binance_data_at": dashboard_api.runtime_telemetry.last_binance_data_at,
+    }
     original_env = {
         "locked": dashboard_api.env_signature._locked,
         "mode": dashboard_api.env_signature._mode,
@@ -34,7 +42,12 @@ def client(monkeypatch):
     monkeypatch.setattr(dashboard_api, "MARKET_DATA_AVAILABLE", False)
     dashboard_api.manager.active_connections.clear()
     dashboard_api.price_clients.clear()
+    dashboard_api.live_log_stream.reset()
     dashboard_api._trading_loop_task = None
+    dashboard_api.runtime_telemetry.last_api_roundtrip_ms = None
+    dashboard_api.runtime_telemetry.last_api_request_at = None
+    dashboard_api.runtime_telemetry.last_websocket_heartbeat_at = None
+    dashboard_api.runtime_telemetry.last_binance_data_at = None
 
     with TestClient(dashboard_api.app) as test_client:
         yield test_client
@@ -53,6 +66,13 @@ def client(monkeypatch):
     dashboard_api.env_signature._checksum = original_env["checksum"]
     dashboard_api.manager.active_connections.clear()
     dashboard_api.price_clients.clear()
+    dashboard_api.live_log_stream.reset()
+    for entry in original_log_entries:
+        dashboard_api.live_log_stream.publish_nowait(entry)
+    dashboard_api.runtime_telemetry.last_api_roundtrip_ms = original_runtime_telemetry["last_api_roundtrip_ms"]
+    dashboard_api.runtime_telemetry.last_api_request_at = original_runtime_telemetry["last_api_request_at"]
+    dashboard_api.runtime_telemetry.last_websocket_heartbeat_at = original_runtime_telemetry["last_websocket_heartbeat_at"]
+    dashboard_api.runtime_telemetry.last_binance_data_at = original_runtime_telemetry["last_binance_data_at"]
 
 
 def test_engine_start_requires_validated_exchange(client):
@@ -114,12 +134,18 @@ def test_system_endpoint_reports_real_incident_state(client):
     dashboard_api.state.incident_reason = "Exchange health degraded"
     dashboard_api.state.trading_paused = True
     dashboard_api._set_engine_status("paused")
+    dashboard_api.runtime_telemetry.note_websocket_heartbeat()
+    dashboard_api.runtime_telemetry.note_binance_data()
 
     payload = client.get("/api/system").json()
 
     assert payload["incident_state"] == "INCIDENT_FREEZE"
     assert payload["trading_paused"] is True
     assert payload["engine_status"] == "paused"
+    assert payload["exchange_health_stage"] == "CLOSE_ONLY"
+    assert isinstance(payload["component_health"], list)
+    assert isinstance(payload["startup_checklist"], list)
+    assert payload["latency"]["last_binance_data_at"] is not None
 
 
 def test_root_websocket_emits_heartbeat_without_client_ping(client, monkeypatch):
@@ -132,6 +158,53 @@ def test_root_websocket_emits_heartbeat_without_client_ping(client, monkeypatch)
     assert init_message["type"] == "init"
     assert heartbeat["type"] == "heartbeat"
     assert "status" in heartbeat
+
+
+def test_health_latency_endpoint_reports_runtime_metrics(client):
+    client.get("/api/system")
+    dashboard_api.runtime_telemetry.note_websocket_heartbeat()
+    dashboard_api.runtime_telemetry.note_binance_data()
+
+    response = client.get("/api/health/latency")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["api_roundtrip_ms"] is not None
+    assert payload["last_websocket_heartbeat_at"] is not None
+    assert payload["last_binance_data_at"] is not None
+
+
+def test_logs_snapshot_and_sse_stream(client):
+    dashboard_api.live_log_stream.reset()
+    dashboard_api.logger.warning("runtime smoke entry for live logs")
+
+    snapshot_response = client.get("/api/logs?levels=WARNING")
+
+    assert snapshot_response.status_code == 200
+    snapshot_payload = snapshot_response.json()
+    assert snapshot_payload["count"] >= 1
+    assert any("runtime smoke entry for live logs" in entry["message"] for entry in snapshot_payload["entries"])
+
+    class FakeRequest:
+        def __init__(self):
+            self._checks = 0
+
+        async def is_disconnected(self):
+            self._checks += 1
+            return self._checks > 1
+
+    async def collect_stream_text():
+        response = await dashboard_api.stream_logs(FakeRequest(), limit=10, levels="WARNING")
+        assert response.media_type == "text/event-stream"
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk)
+        return "".join(chunks)
+
+    streamed_text = asyncio.run(collect_stream_text())
+
+    assert "event: snapshot" in streamed_text
+    assert "runtime smoke entry for live logs" in streamed_text
 
 
 def test_update_risk_settings_updates_settings_and_risk_views(client, monkeypatch):
