@@ -82,9 +82,10 @@ class IntradayScalper(BaseStrategy):
         df: pd.DataFrame,
         i: int,
         current_price: float,
+        multi_tf_data: Optional[Dict[str, pd.DataFrame]] = None,
     ) -> SignalResult:
         """BaseStrategy-compatible entry point for engine pipeline usage."""
-        data = self._compose_data(df, i)
+        data = multi_tf_data or self._compose_data(df, i)
         return self.generate_multi_timeframe_signal(data=data, account_balance=10000.0)
 
     def generate_multi_timeframe_signal(

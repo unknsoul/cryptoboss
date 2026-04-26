@@ -2,9 +2,11 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
+import yaml
 
 from .bos_choch import MarketTrend, StructureAnalyzer
 from .fvg import FVGType, FairValueGapDetector
@@ -66,11 +68,28 @@ class SMCEngine:
         self.atr_sl_multiplier = atr_sl_multiplier
         self.tp_ratios = tp_ratios or [1.5, 2.5, 4.0]
         self._counter = 0
+        self.use_body_only_ob = self._load_use_body_only_flag()
 
-        self.ob_detectors = {tf: OrderBlockDetector(timeframe=tf) for tf in self.timeframes}
+        self.ob_detectors = {
+            tf: OrderBlockDetector(timeframe=tf, use_body_only=self.use_body_only_ob)
+            for tf in self.timeframes
+        }
         self.fvg_detectors = {tf: FairValueGapDetector(timeframe=tf) for tf in self.timeframes}
         self.structure_analyzers = {tf: StructureAnalyzer(timeframe=tf) for tf in self.timeframes}
         self.liquidity_hunters = {tf: LiquidityHunter(timeframe=tf) for tf in self.timeframes}
+
+    @staticmethod
+    def _load_use_body_only_flag() -> bool:
+        """Read the order-block body-only setting from scalper config."""
+        config_path = Path(__file__).resolve().parents[2] / "configs" / "scalper_config.yaml"
+        if not config_path.exists():
+            return False
+        try:
+            payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return False
+        smc_payload = payload.get("smc", {}) if isinstance(payload, dict) else {}
+        return bool(smc_payload.get("use_body_only_ob", False))
 
     def analyze(self, data: Dict[str, pd.DataFrame]) -> List[SMCSetup]:
         setups: List[SMCSetup] = []
@@ -104,6 +123,18 @@ class SMCEngine:
 
         setups.sort(key=lambda item: item.confidence, reverse=True)
         return setups
+
+    def get_active_setups(
+        self,
+        data: Dict[str, pd.DataFrame],
+        timeframe: Optional[str] = None,
+        limit: int = 5,
+    ) -> List[SMCSetup]:
+        """Return the highest-confidence active setups for the requested timeframe."""
+        setups = self.analyze(data)
+        if timeframe is not None:
+            setups = [setup for setup in setups if setup.timeframe == timeframe]
+        return setups[: max(limit, 0)]
 
     @staticmethod
     def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:

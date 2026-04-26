@@ -20,7 +20,6 @@ CRITICAL RULES:
 
 import asyncio
 import logging
-import random
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -134,6 +133,7 @@ class PaperBroker(BaseBroker):
         self._open_orders: List[Dict] = []
         self._order_counter = 0
         self.slippage_pct = slippage_pct
+        self.slippage_bps = max(float(slippage_pct) * 100.0, 5.0)
         self.fee_rate = fee_rate
         self._prices: Dict[str, float] = {}
 
@@ -167,13 +167,13 @@ class PaperBroker(BaseBroker):
                 error_message=f"No price available for {intent.symbol}",
             )
 
-        # Apply slippage
-        slippage_factor = 1.0 + (
-            random.uniform(0, self.slippage_pct / 100)
-            * (1 if intent.side == OrderSide.BUY else -1)
-        )
-        fill_price = base_price * slippage_factor
-        slippage_bps = abs(fill_price - base_price) / base_price * 10000
+        # Apply adverse-only slippage in paper mode.
+        slip_ratio = self.slippage_bps / 10000.0
+        if intent.side == OrderSide.BUY:
+            fill_price = base_price * (1.0 + slip_ratio)
+        else:
+            fill_price = base_price * (1.0 - slip_ratio)
+        slippage_bps = self.slippage_bps
 
         # Calculate fees
         trade_value = intent.quantity * fill_price
