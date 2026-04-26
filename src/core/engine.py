@@ -237,6 +237,13 @@ class TradingEngine:
         
         logger.info(f"Stopped strategy: {strategy_id}")
         return True
+
+    def get_strategy(self, strategy_id: str) -> Optional[Any]:
+        """Return the live strategy instance for the requested strategy id."""
+        strategy_info = self.strategies.get(strategy_id)
+        if not strategy_info:
+            return None
+        return strategy_info.get("strategy")
     
     async def _process_price_update(self, symbol: str, price: float, df=None, index: int = 0):
         """Process a price update for all relevant strategies."""

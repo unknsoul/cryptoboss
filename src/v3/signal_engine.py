@@ -275,7 +275,7 @@ class SignalEngine:
         Returns True if current ATR >= threshold_mult * average ATR (enough volatility).
         Returns False if volatility is too low for scalping.
         """
-        if len(frame) < period * 2:
+        if len(frame) < max(period * 2, 20):
             return True  # Not enough data — allow trading
 
         high = frame["high"].astype(float)
@@ -289,10 +289,14 @@ class SignalEngine:
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
         atr = tr.rolling(window=period, min_periods=period).mean()
+        if atr.empty or pd.isna(atr.iloc[-1]):
+            return False
         current_atr = float(atr.iloc[-1])
 
         # Average ATR over longer period
         avg_atr = float(atr.iloc[-period * 2: -1].mean()) if len(atr) > period * 2 else current_atr
+        if pd.isna(avg_atr) or avg_atr <= 0:
+            return False
 
         return current_atr >= threshold_mult * avg_atr
 

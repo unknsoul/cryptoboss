@@ -289,7 +289,10 @@ class PerformanceAnalyticsEngine:
 
     @staticmethod
     def _monthly_returns(df: pd.DataFrame, initial_capital: float) -> dict[str, float]:
-        monthly_pnl = df.groupby(df["closed_at"].dt.to_period("M"))["pnl_usdt"].sum()
+        monthly_source = df["closed_at"]
+        if getattr(monthly_source.dt, "tz", None) is not None:
+            monthly_source = monthly_source.dt.tz_convert("UTC").dt.tz_localize(None)
+        monthly_pnl = df.groupby(monthly_source.dt.to_period("M"))["pnl_usdt"].sum()
         return {
             str(period): float((pnl / initial_capital) * 100.0)
             for period, pnl in monthly_pnl.items()

@@ -9,13 +9,15 @@ Implements:
 """
 
 import asyncio
+from collections import deque
 import json
 import logging
 import random
 import uuid
 import hashlib
+import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any, AsyncIterator, Deque, Dict, List, Optional, Set, Tuple
 from pathlib import Path
 from enum import Enum
 import sys
@@ -26,9 +28,9 @@ import pandas as pd
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header, Request, Body
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -45,6 +47,14 @@ except ImportError as e:
     ProStrategyBuilder = Any  # type: ignore
     INDICATOR_LIBRARY = {}  # type: ignore
     logging.warning(f"v4 modules not available: {e}")
+
+try:
+    from src.analytics import TradeAnalyticsService
+    ANALYTICS_AVAILABLE = True
+except ImportError as e:
+    ANALYTICS_AVAILABLE = False
+    TradeAnalyticsService = Any  # type: ignore
+    logging.warning(f"Analytics services not available: {e}")
 
 # Import session manager
 try:
@@ -67,6 +77,10 @@ try:
     AUTH_AVAILABLE = True
 except ImportError as e:
     AUTH_AVAILABLE = False
+    get_auth_service = None  # type: ignore
+    get_account_service = None  # type: ignore
+    User = Any  # type: ignore
+    ExchangeAccount = Any  # type: ignore
     logging.warning(f"Auth services not available: {e}")
 
 # v1.0.1: Import scoped state manager
@@ -123,6 +137,8 @@ try:
     MARKET_DATA_AVAILABLE = True
 except ImportError as e:
     MARKET_DATA_AVAILABLE = False
+    MarketDataService = Any  # type: ignore
+    PriceTick = Any  # type: ignore
     logging.warning(f"Market data service not available: {e}")
 
 # v12.0: Import SMC/scalper/builder/tester stack
@@ -159,6 +175,174 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Dashboard")
 
 _v4_orchestrator = None
+
+
+class RuntimeTelemetry:
+    """Tracks lightweight runtime timings for dashboard health surfaces."""
+
+    def __init__(self) -> None:
+        self.last_api_roundtrip_ms: Optional[float] = None
+        self.last_api_request_at: Optional[datetime] = None
+        self.last_websocket_heartbeat_at: Optional[datetime] = None
+        self.last_binance_data_at: Optional[datetime] = None
+
+    def note_api_request(self, latency_ms: float) -> None:
+        self.last_api_roundtrip_ms = round(latency_ms, 2)
+        self.last_api_request_at = datetime.now()
+
+    def note_websocket_heartbeat(self) -> None:
+        self.last_websocket_heartbeat_at = datetime.now()
+
+    def note_binance_data(self, observed_at: Optional[datetime] = None) -> None:
+        self.last_binance_data_at = observed_at or datetime.now()
+
+
+class LiveLogStream:
+    """Buffered log stream for dashboard snapshots and SSE subscribers."""
+
+    def __init__(self, max_entries: int = 800) -> None:
+        self._entries: Deque[Dict[str, Any]] = deque(maxlen=max_entries)
+        self._subscribers: Set[asyncio.Queue] = set()
+
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subscribers)
+
+    @property
+    def entry_count(self) -> int:
+        return len(self._entries)
+
+    def publish_nowait(self, entry: Dict[str, Any]) -> None:
+        self._entries.append(entry)
+        stale_subscribers: List[asyncio.Queue] = []
+        for queue in list(self._subscribers):
+            try:
+                queue.put_nowait(entry)
+            except asyncio.QueueFull:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    stale_subscribers.append(queue)
+                    continue
+                try:
+                    queue.put_nowait(entry)
+                except asyncio.QueueFull:
+                    stale_subscribers.append(queue)
+            except RuntimeError:
+                stale_subscribers.append(queue)
+
+        for queue in stale_subscribers:
+            self._subscribers.discard(queue)
+
+    def subscribe(self) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=250)
+        self._subscribers.add(queue)
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue) -> None:
+        self._subscribers.discard(queue)
+
+    def reset(self) -> None:
+        self._entries.clear()
+        self._subscribers.clear()
+
+    def snapshot(
+        self,
+        limit: int = 200,
+        levels: Optional[Set[str]] = None,
+        module: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        entries = list(self._entries)[-max(limit, 0):]
+        return [
+            entry.copy()
+            for entry in entries
+            if _log_entry_matches(entry, levels=levels, module=module, search=search)
+        ]
+
+    def available_modules(self) -> List[str]:
+        modules = {entry.get("module", "unknown") for entry in self._entries if entry.get("module")}
+        return sorted(modules)
+
+
+def _log_entry_matches(
+    entry: Dict[str, Any],
+    levels: Optional[Set[str]] = None,
+    module: Optional[str] = None,
+    search: Optional[str] = None,
+) -> bool:
+    if levels and entry.get("level") not in levels:
+        return False
+    if module and entry.get("module") != module:
+        return False
+    if search:
+        haystack = " ".join(
+            [
+                str(entry.get("message", "")),
+                str(entry.get("module", "")),
+                str(entry.get("logger", "")),
+            ]
+        ).lower()
+        if search.lower() not in haystack:
+            return False
+    return True
+
+
+def _serialize_log_record(record: logging.LogRecord) -> Dict[str, Any]:
+    created_at = datetime.fromtimestamp(record.created)
+    return {
+        "timestamp": created_at.isoformat(),
+        "level": record.levelname.upper(),
+        "module": record.module or record.name,
+        "logger": record.name,
+        "message": record.getMessage(),
+        "pathname": record.pathname,
+        "line": record.lineno,
+    }
+
+
+class DashboardLogHandler(logging.Handler):
+    """Publishes log records into the live dashboard stream."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            live_log_stream.publish_nowait(_serialize_log_record(record))
+        except Exception:
+            return
+
+
+runtime_telemetry = RuntimeTelemetry()
+live_log_stream = LiveLogStream()
+
+
+def _install_live_log_handler() -> None:
+    root_logger = logging.getLogger()
+    if any(isinstance(handler, DashboardLogHandler) for handler in root_logger.handlers):
+        return
+
+    handler = DashboardLogHandler()
+    handler.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+
+def _age_ms(value: Optional[datetime]) -> Optional[int]:
+    if value is None:
+        return None
+    return max(int((datetime.now() - value).total_seconds() * 1000), 0)
+
+
+def _parse_history_timestamp(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    timestamp = pd.to_datetime(value, errors="coerce", utc=True)
+    if pd.isna(timestamp):
+        return None
+    if getattr(timestamp, "tzinfo", None) is not None:
+        return timestamp.tz_convert(None).to_pydatetime()
+    return timestamp.to_pydatetime()
+
+
+_install_live_log_handler()
 
 
 def get_v4() -> Optional["OrchestratorV4"]:
@@ -295,6 +479,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def capture_request_latency(request: Request, call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    runtime_telemetry.note_api_request((time.perf_counter() - started) * 1000)
+    if runtime_telemetry.last_api_roundtrip_ms is not None:
+        response.headers["X-Server-Latency-Ms"] = f"{runtime_telemetry.last_api_roundtrip_ms:.2f}"
+    return response
 
 
 # === Security ===
@@ -585,6 +779,7 @@ def _risk_limits_snapshot() -> Dict[str, Any]:
 
 
 risk_settings = _load_risk_settings()
+trade_analytics = TradeAnalyticsService() if ANALYTICS_AVAILABLE else None
 
 
 def _set_engine_status(status: str) -> None:
@@ -603,6 +798,52 @@ def _resolved_engine_status() -> str:
     if state.api_validated and state.exchange_client is not None:
         return state.engine_status
     return "stopped"
+
+
+def _resolve_runtime_engine() -> Optional[Any]:
+    """Best-effort lookup for the active trading engine instance."""
+    if BOT_INSTANCE_AVAILABLE:
+        bot = get_active_bot()
+        engine = getattr(bot, "engine", None) if bot is not None else None
+        if engine is not None:
+            return engine
+
+    if ENGINE_LIFECYCLE_AVAILABLE:
+        lifecycle = get_engine_lifecycle()
+        engine = getattr(lifecycle, "engine", None)
+        if engine is not None:
+            return engine
+
+    return None
+
+
+def _resolve_aggressive_scalper() -> Optional[Any]:
+    """Return the live aggressive scalper instance when available."""
+    engine = _resolve_runtime_engine()
+    if engine is not None and hasattr(engine, "get_strategy"):
+        strategy = engine.get_strategy("aggressive_scalper_v1")
+        if strategy is not None:
+            return strategy
+    return _aggressive_scalper_instance
+
+
+def _sync_aggressive_scalper_runtime(balance_hint: Optional[float] = None) -> Optional[Any]:
+    """Refresh runtime account and PnL inputs on the aggressive scalper instance."""
+    strategy = _resolve_aggressive_scalper()
+    if strategy is None:
+        return None
+
+    balance = balance_hint
+    if balance is None or balance <= 0:
+        balance = state.capital or state.initial_capital or 10000.0
+
+    if hasattr(strategy, "set_account_balance"):
+        strategy.set_account_balance(float(balance))
+    if hasattr(strategy, "set_daily_pnl"):
+        strategy.set_daily_pnl(float(state.pnl))
+    if hasattr(strategy, "set_weekly_pnl"):
+        strategy.set_weekly_pnl(float(state.total_pnl))
+    return strategy
 
 
 async def _attach_exchange_client_for_account(user_id: str, account: ExchangeAccount) -> Dict[str, Any]:
@@ -687,6 +928,37 @@ async def _restore_active_account_runtime(user: User, account: ExchangeAccount) 
     balances = await _attach_exchange_client_for_account(user.user_id, account)
     await start_real_trading_loop()
     return balances
+
+
+def _require_trade_analytics() -> "TradeAnalyticsService":
+    """Return the analytics service or raise a service-unavailable error."""
+    if not ANALYTICS_AVAILABLE or trade_analytics is None:
+        raise HTTPException(status_code=503, detail="Analytics service is unavailable")
+    return trade_analytics
+
+
+def _load_analytics_trade_records(user: User, limit: int = 5000) -> tuple[Optional[str], list[dict[str, Any]], float]:
+    """Load recent trades for the user's active account for analytics views."""
+    initial_capital = _capital_reference()
+
+    active_account_id = getattr(state, "active_exchange_account_id", None) or _lookup_persisted_active_account_id(user.user_id)
+    if active_account_id:
+        try:
+            from src.core.database.repository import get_repository
+
+            repo = get_repository()
+            trades = repo.get_trades(user.user_id, active_account_id, limit=limit)
+            return active_account_id, trades, initial_capital
+        except Exception as exc:
+            logger.warning(f"Failed to load analytics trades from SQLite: {exc}")
+
+    if BOT_INSTANCE_AVAILABLE:
+        bot = get_active_bot()
+        if bot:
+            trade_history = bot.trading_state.trade_history[-limit:]
+            return active_account_id, trade_history, initial_capital
+
+    return active_account_id, [], initial_capital
 
 
 # === v12 Runtime Objects & Helpers ===
@@ -1350,7 +1622,7 @@ async def signup(request: SignupRequest):
 
     CryptoBoss 1.0.1: Email/password authentication.
     """
-    if not AUTH_AVAILABLE:
+    if get_account_service is None:
         raise HTTPException(status_code=501, detail="Auth services not available")
 
     auth_service = get_auth_service()
@@ -1475,7 +1747,7 @@ async def select_account(request: SelectAccountRequest, user: User = Depends(req
     3. START a brand-new bot instance
     4. LOAD state ONLY for selected exchange_account_id
     """
-    if not AUTH_AVAILABLE:
+    if get_account_service is None:
         raise HTTPException(status_code=501, detail="Auth services not available")
 
     account_service = get_account_service()
@@ -1745,6 +2017,220 @@ async def reset_account(exchange_account_id: str, request: ResetAccountRequest, 
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# === System State / Observability Helpers ===
+
+def _component_file_exists(relative_path: str) -> bool:
+    return (Path(__file__).parent.parent / relative_path).exists()
+
+
+def _freshness_status(age_ms: Optional[int]) -> str:
+    if age_ms is None:
+        return "RED"
+    if age_ms <= 15_000:
+        return "GREEN"
+    if age_ms <= 60_000:
+        return "AMBER"
+    return "RED"
+
+
+def _latest_symbol_timestamp(symbol: Optional[str] = None) -> Optional[datetime]:
+    target = symbol.replace("/", "") if symbol else None
+    for item in reversed(state.price_history):
+        raw_symbol = str(item.get("symbol", "")).replace("/", "")
+        if target and raw_symbol and raw_symbol != target:
+            continue
+        timestamp = _parse_history_timestamp(item.get("time") or item.get("timestamp"))
+        if timestamp is not None:
+            return timestamp
+    return None
+
+
+def _data_freshness_snapshot() -> Dict[str, Any]:
+    timeframes = ("1m", "5m", "15m", "1h")
+    latest_market_data = runtime_telemetry.last_binance_data_at or _latest_symbol_timestamp()
+    symbols: List[Dict[str, Any]] = []
+
+    for symbol in SUPPORTED_SYMBOLS:
+        latest_symbol_data = _latest_symbol_timestamp(symbol)
+        age_ms = _age_ms(latest_symbol_data)
+        rows = []
+        for timeframe in timeframes:
+            rows.append(
+                {
+                    "timeframe": timeframe,
+                    "last_update": latest_symbol_data.isoformat() if latest_symbol_data else None,
+                    "age_ms": age_ms,
+                    "status": _freshness_status(age_ms),
+                }
+            )
+        symbols.append(
+            {
+                "symbol": symbol,
+                "last_update": latest_symbol_data.isoformat() if latest_symbol_data else None,
+                "age_ms": age_ms,
+                "status": _freshness_status(age_ms),
+                "timeframes": rows,
+            }
+        )
+
+    return {
+        "latest_market_data_at": latest_market_data.isoformat() if latest_market_data else None,
+        "symbols": symbols,
+        "stale_symbols": [row["symbol"] for row in symbols if row["status"] == "RED"],
+    }
+
+
+def _exchange_health_stage() -> str:
+    if state.kill_switch_active or state.incident_state == "HALTED":
+        return "HALTED"
+    if state.incident_state == "INCIDENT_FREEZE":
+        return "CLOSE_ONLY"
+    if state.connection_status != "connected" or state.trading_paused or state.incident_state == "DEGRADED":
+        return "DEGRADED"
+    return "NORMAL"
+
+
+def _component_health_snapshot() -> List[Dict[str, str]]:
+    engine_status = _resolved_engine_status()
+    market_data_age_ms = _age_ms(runtime_telemetry.last_binance_data_at or _latest_symbol_timestamp())
+    connection_ok = state.connection_status == "connected"
+
+    components: List[Tuple[str, str, str]] = [
+        (
+            "TradingEngine",
+            "GREEN" if engine_status == "running" else "AMBER" if engine_status == "paused" else "RED",
+            f"Engine status: {engine_status}",
+        ),
+        (
+            "RiskGuardian",
+            "RED" if state.kill_switch_active else "GREEN",
+            "Kill switch active" if state.kill_switch_active else "Risk controls responsive",
+        ),
+        (
+            "ExecutionRouter",
+            "GREEN" if connection_ok and state.api_validated else "AMBER" if state.api_validated else "RED",
+            f"Connection {state.connection_status}, API {'validated' if state.api_validated else 'pending'}",
+        ),
+        (
+            "StateManager",
+            "GREEN",
+            f"Session {state.session_id[:8]} active",
+        ),
+        (
+            "EventBus",
+            "GREEN",
+            f"{len(manager.active_connections)} root sockets connected",
+        ),
+        (
+            "SignalEngine",
+            "GREEN" if AGGRESSIVE_SCALPER_AVAILABLE or V12_AVAILABLE else "RED",
+            "Aggressive scalper ready" if AGGRESSIVE_SCALPER_AVAILABLE else "Strategy stack fallback",
+        ),
+        (
+            "BiasEngine",
+            "GREEN" if _component_file_exists("src/core/bias_engine.py") else "RED",
+            "Bias engine module present" if _component_file_exists("src/core/bias_engine.py") else "Bias engine missing",
+        ),
+        (
+            "SentimentEngine",
+            "GREEN" if _component_file_exists("src/analysis/sentiment_engine.py") else "AMBER",
+            "Sentiment engine discovered" if _component_file_exists("src/analysis/sentiment_engine.py") else "Sentiment engine unavailable",
+        ),
+        (
+            "SMCEngine",
+            "GREEN" if V12_AVAILABLE and _component_file_exists("src/smc/smc_engine.py") else "RED",
+            "SMC stack ready" if V12_AVAILABLE else "SMC stack unavailable",
+        ),
+        (
+            "CapitalGovernor",
+            "GREEN" if _component_file_exists("src/core/capital_governor.py") else "RED",
+            "Capital controls loaded" if _component_file_exists("src/core/capital_governor.py") else "Capital governor missing",
+        ),
+        (
+            "MarketContextEngine",
+            "GREEN" if _component_file_exists("src/core/market_context_engine.py") else "RED",
+            f"Context: {state.market_context}",
+        ),
+        (
+            "DataPipeline",
+            "GREEN" if market_data_age_ms is not None and market_data_age_ms <= 60_000 else "AMBER" if MARKET_DATA_AVAILABLE or LIVE_PRICE_FEED_AVAILABLE else "RED",
+            "Fresh market data" if market_data_age_ms is not None and market_data_age_ms <= 60_000 else "Awaiting live data",
+        ),
+    ]
+
+    return [
+        {"component": component, "status": status, "detail": detail}
+        for component, status, detail in components
+    ]
+
+
+def _startup_checklist() -> List[Dict[str, Any]]:
+    latest_market_data = runtime_telemetry.last_binance_data_at or _latest_symbol_timestamp()
+    market_data_age_ms = _age_ms(latest_market_data)
+    return [
+        {
+            "step": "Environment Lock",
+            "completed": env_signature.is_locked,
+            "detail": env_signature.mode.upper(),
+        },
+        {
+            "step": "Account Selected",
+            "completed": bool(state.active_exchange_account_id),
+            "detail": state.active_exchange_account_id or "No active account",
+        },
+        {
+            "step": "API Validation",
+            "completed": state.api_validated,
+            "detail": "Validated" if state.api_validated else "Pending exchange validation",
+        },
+        {
+            "step": "Exchange Connection",
+            "completed": state.connection_status == "connected",
+            "detail": state.connection_status,
+        },
+        {
+            "step": "Market Data Warm",
+            "completed": market_data_age_ms is not None and market_data_age_ms <= 60_000,
+            "detail": f"{market_data_age_ms} ms age" if market_data_age_ms is not None else "No live market data yet",
+        },
+        {
+            "step": "Risk Limits Loaded",
+            "completed": bool(risk_settings),
+            "detail": f"{risk_settings.get('trades_per_day', 0)} trades/day",
+        },
+        {
+            "step": "Engine Ready",
+            "completed": _resolved_engine_status() in {"running", "paused"},
+            "detail": _resolved_engine_status(),
+        },
+    ]
+
+
+def _latency_snapshot() -> Dict[str, Any]:
+    latest_market_data = runtime_telemetry.last_binance_data_at or _latest_symbol_timestamp()
+    return {
+        "api_roundtrip_ms": runtime_telemetry.last_api_roundtrip_ms,
+        "last_api_request_at": runtime_telemetry.last_api_request_at.isoformat() if runtime_telemetry.last_api_request_at else None,
+        "last_websocket_heartbeat_at": runtime_telemetry.last_websocket_heartbeat_at.isoformat() if runtime_telemetry.last_websocket_heartbeat_at else None,
+        "websocket_heartbeat_age_ms": _age_ms(runtime_telemetry.last_websocket_heartbeat_at),
+        "last_binance_data_at": latest_market_data.isoformat() if latest_market_data else None,
+        "binance_data_age_ms": _age_ms(latest_market_data),
+        "active_root_ws_clients": len(manager.active_connections),
+        "active_price_ws_clients": len(price_clients),
+    }
+
+
+def _parse_log_levels(levels: Optional[str]) -> Optional[Set[str]]:
+    if not levels:
+        return None
+    parsed = {value.strip().upper() for value in levels.split(",") if value.strip()}
+    return parsed or None
+
+
+def _sse_message(event: str, payload: Dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
 # === System State Endpoints ===
 
 @app.get("/api/system")
@@ -1776,8 +2262,21 @@ async def get_system():
         "ws_clients": len(manager.active_connections),
         "incident_state": state.incident_state,
         "trading_paused": state.trading_paused,
+        "exchange_health_stage": _exchange_health_stage(),
+        "component_health": _component_health_snapshot(),
+        "startup_checklist": _startup_checklist(),
+        "data_freshness": _data_freshness_snapshot(),
+        "latency": _latency_snapshot(),
+        "log_stream_clients": live_log_stream.subscriber_count,
+        "log_buffer_size": live_log_stream.entry_count,
     }
     return wrap_legacy_response(system_data)
+
+
+@app.get("/api/health/latency")
+async def get_health_latency():
+    """Return the latest runtime latency and market-data freshness metrics."""
+    return wrap_legacy_response(_latency_snapshot(), DataSourceTag.DERIVED)
 
 
 @app.get("/api/context")
@@ -1853,8 +2352,15 @@ async def get_risk():
 
 
 @app.post("/api/kill-switch")
-async def toggle_kill_switch(active: bool = True, reason: str = "Manual activation"):
+async def toggle_kill_switch(
+    active: bool = True,
+    reason: str = "Manual activation",
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+):
     """Toggle the kill switch."""
+    if payload:
+        active = bool(payload.get("active", active))
+        reason = str(payload.get("reason", reason))
     state.kill_switch_active = active
     state.kill_switch_reason = reason if active else None
     state.operator_action_log.append({
@@ -1958,6 +2464,7 @@ async def get_live_prices():
 
             # If we got at least one valid price, return immediately
             if any(p.get("price", 0) > 0 for p in prices.values()):
+                runtime_telemetry.note_binance_data()
                 return wrap_legacy_response({
                     "prices": prices,
                     "symbols": SUPPORTED_SYMBOLS,
@@ -1990,6 +2497,8 @@ async def get_live_prices():
                     "timestamp": datetime.now().isoformat(),
                     "source": "BINANCE_REST",
                 }
+            if any(p.get("price", 0) > 0 for p in prices.values()):
+                runtime_telemetry.note_binance_data()
         except Exception as rest_err:
             logger.warning(f"Binance public REST fallback failed: {rest_err}")
             for symbol in SUPPORTED_SYMBOLS:
@@ -2398,6 +2907,72 @@ async def update_risk_settings(request: RiskSettingsUpdateRequest):
     })
 
 
+@app.get("/api/analytics/today")
+async def get_analytics_today(user: User = Depends(require_auth)):
+    """Return today's trading analytics summary."""
+    service = _require_trade_analytics()
+    active_account_id, trades, initial_capital = _load_analytics_trade_records(user)
+    summary = service.today_summary(trades, initial_capital=initial_capital)
+    summary["exchange_account_id"] = active_account_id
+    return wrap_legacy_response(summary, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/hourly-performance")
+async def get_analytics_hourly_performance(user: User = Depends(require_auth)):
+    """Return hourly win-rate and heatmap analytics."""
+    service = _require_trade_analytics()
+    active_account_id, trades, _ = _load_analytics_trade_records(user)
+    payload = service.hourly_performance(trades)
+    payload["exchange_account_id"] = active_account_id
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/symbol-performance")
+async def get_analytics_symbol_performance(user: User = Depends(require_auth)):
+    """Return symbol-level performance stats."""
+    service = _require_trade_analytics()
+    active_account_id, trades, _ = _load_analytics_trade_records(user)
+    payload = {
+        "exchange_account_id": active_account_id,
+        "symbols": service.symbol_performance(trades),
+    }
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/strategy-breakdown")
+async def get_analytics_strategy_breakdown(user: User = Depends(require_auth)):
+    """Return strategy-level performance stats."""
+    service = _require_trade_analytics()
+    active_account_id, trades, _ = _load_analytics_trade_records(user)
+    payload = {
+        "exchange_account_id": active_account_id,
+        "strategies": service.strategy_breakdown(trades),
+    }
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/weekly-equity")
+async def get_analytics_weekly_equity(user: User = Depends(require_auth)):
+    """Return weekly equity-curve points."""
+    service = _require_trade_analytics()
+    active_account_id, trades, initial_capital = _load_analytics_trade_records(user)
+    payload = service.weekly_equity(trades, initial_capital=initial_capital)
+    payload["exchange_account_id"] = active_account_id
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
+@app.get("/api/analytics/drawdown-periods")
+async def get_analytics_drawdown_periods(user: User = Depends(require_auth)):
+    """Return drawdown periods derived from closed-trade history."""
+    service = _require_trade_analytics()
+    active_account_id, trades, initial_capital = _load_analytics_trade_records(user)
+    payload = {
+        "exchange_account_id": active_account_id,
+        "periods": service.drawdown_periods(trades, initial_capital=initial_capital),
+    }
+    return wrap_legacy_response(payload, DataSourceTag.DERIVED)
+
+
 @app.get("/api/replay/sessions")
 async def get_replay_sessions(exchange_account_id: Optional[str] = None):
     """Replay is opt-in; return empty sessions when none are recorded."""
@@ -2418,25 +2993,39 @@ async def get_replay_session(session_id: str, exchange_account_id: Optional[str]
 
 
 class StrategyToggleRequest(BaseModel):
-    strategy: str
+    strategy: Optional[str] = None
+    id: Optional[str] = None
+
+    @property
+    def target(self) -> str:
+        """Return the requested strategy identifier or display name."""
+        return (self.id or self.strategy or "").strip()
 
 
 @app.post("/api/strategy/enable")
 async def enable_strategy(request: StrategyToggleRequest):
-    """Compatibility no-op for legacy strategy control UI."""
+    """Compatibility endpoint that toggles known strategy runtimes."""
+    target = request.target
+    strategy = _sync_aggressive_scalper_runtime()
+    if target in {"aggressive_scalper", "aggressive_scalper_v1", "Aggressive Scalper"} and strategy is not None:
+        strategy.config.enabled = True
     return wrap_legacy_response({
         "success": True,
-        "strategy": request.strategy,
+        "strategy": target,
         "enabled": True,
     })
 
 
 @app.post("/api/strategy/disable")
 async def disable_strategy(request: StrategyToggleRequest):
-    """Compatibility no-op for legacy strategy control UI."""
+    """Compatibility endpoint that toggles known strategy runtimes."""
+    target = request.target
+    strategy = _sync_aggressive_scalper_runtime()
+    if target in {"aggressive_scalper", "aggressive_scalper_v1", "Aggressive Scalper"} and strategy is not None:
+        strategy.config.enabled = False
     return wrap_legacy_response({
         "success": True,
-        "strategy": request.strategy,
+        "strategy": target,
         "enabled": False,
     })
 
@@ -2492,7 +3081,8 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
             "count": len(trades),
             "is_new_account": len(trades) == 0,
             "user_id": user.user_id,
-            "exchange_account_id": active_account_id
+            "exchange_account_id": active_account_id,
+            "message": "No trades yet. Start the engine and wait for signals." if len(trades) == 0 else None,
         })
 
     except Exception as e:
@@ -2506,7 +3096,8 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
                 return wrap_response({
                     "trades": trades,
                     "count": len(trades),
-                    "is_new_account": len(bot.trading_state.trade_history) == 0
+                    "is_new_account": len(bot.trading_state.trade_history) == 0,
+                    "message": "No trades yet. Start the engine and wait for signals." if len(trades) == 0 else None,
                 })
 
         # Ultimate fallback - empty
@@ -2514,6 +3105,7 @@ async def get_trades(limit: int = 50, user: User = Depends(require_auth)):
             "trades": [],
             "count": 0,
             "is_new_account": True,
+            "message": "No trades yet. Start the engine and wait for signals.",
             "error": str(e)
         })
 
@@ -2634,22 +3226,23 @@ async def get_strategies():
         }
     ]
 
-    if AGGRESSIVE_SCALPER_AVAILABLE and _aggressive_scalper_instance:
-        s = _aggressive_scalper_instance.get_status()
+    aggressive_scalper = _sync_aggressive_scalper_runtime()
+    if AGGRESSIVE_SCALPER_AVAILABLE and aggressive_scalper:
+        s = aggressive_scalper.get_status()
         strategies.append({
-            "id": "aggressive_scalper",
+            "id": "aggressive_scalper_v1",
             "name": "Aggressive Scalper",
             "type": "AggressiveScalper",
-            "symbol": "BTC/USDT, ETH/USDT, SOL/USDT",
-            "status": "halted" if s.get("halted") else ("active" if state.api_validated else "waiting"),
-            "enabled": not s.get("halted", False),
+            "symbol": ", ".join(aggressive_scalper.config.metadata.get("symbols", ["BTC/USDT"])),
+            "status": "halted" if s.get("halted") else ("active" if aggressive_scalper.config.enabled else "disabled"),
+            "enabled": aggressive_scalper.config.enabled and not s.get("halted", False),
             "healthScore": 0.0 if s.get("halted") else 0.75,
             "recentDecay": 0.0,
             "wins": 0,
             "losses": 0,
-            "leverage": s.get("leverage", 15),
-            "stop_loss_pct": s.get("stop_loss_pct", 0.4),
-            "take_profit_pct": s.get("take_profit_pct", 1.2),
+            "leverage": s.get("leverage", 1),
+            "stop_loss_pct": s.get("stop_loss_atr_mult", 0.6),
+            "take_profit_pct": s.get("take_profit_2_mult", 2.8),
             "daily_loss_pct": s.get("daily_loss_pct", 0),
             "trades_last_hour": s.get("trades_last_hour", 0),
             "pnl": 0,
@@ -2668,9 +3261,10 @@ async def get_strategies():
 @app.get("/api/scalper/aggressive/status")
 async def get_aggressive_scalper_status():
     """Current status of the AggressiveScalper."""
-    if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
-        raise HTTPException(status_code=503, detail="AggressiveScalper not available")
-    return wrap_response(_aggressive_scalper_instance.get_status())
+    strategy = _sync_aggressive_scalper_runtime()
+    if not AGGRESSIVE_SCALPER_AVAILABLE or strategy is None:
+        return wrap_response({"status": "inactive"})
+    return wrap_response(strategy.get_status())
 
 
 
@@ -2779,10 +3373,18 @@ async def get_scalper_live(symbol: str = "BTC/USDT", account_balance: float = 10
     if not V12_AVAILABLE or v12_scalper is None:
         raise HTTPException(status_code=503, detail="v12 scalper module is unavailable")
 
+    effective_balance = state.capital or state.initial_capital or account_balance
     timeframes = [v12_scalper.bias_timeframe, v12_scalper.mid_timeframe, v12_scalper.entry_timeframe]
     data = await fetch_multi_tf_data(symbol=symbol, timeframes=timeframes, limit=400)
-    signal = v12_scalper.generate_multi_timeframe_signal(data=data, account_balance=account_balance)
+    signal = v12_scalper.generate_multi_timeframe_signal(data=data, account_balance=effective_balance)
     analysis = v12_scalper.analyze_current_market(data=data)
+    active_setups = v12_scalper.smc_engine.get_active_setups(
+        data=data,
+        timeframe=v12_scalper.entry_timeframe,
+        limit=5,
+    )
+    analysis["top_setups"] = [_serialize_setup(setup) for setup in active_setups]
+    analysis["setups_count"] = len(active_setups)
 
     return wrap_response(
         {
@@ -3552,11 +4154,93 @@ async def get_incident_state():
     return wrap_legacy_response(_incident_snapshot())
 
 
+@app.get("/api/logs")
+async def get_logs(
+    limit: int = 200,
+    levels: Optional[str] = None,
+    module: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    """Return buffered runtime logs for the dashboard log viewer."""
+    level_filter = _parse_log_levels(levels)
+    entries = live_log_stream.snapshot(
+        limit=min(max(limit, 1), 800),
+        levels=level_filter,
+        module=module,
+        search=search,
+    )
+    return wrap_legacy_response(
+        {
+            "entries": entries,
+            "count": len(entries),
+            "available_modules": live_log_stream.available_modules(),
+            "active_stream_clients": live_log_stream.subscriber_count,
+            "buffered_entries": live_log_stream.entry_count,
+        },
+        DataSourceTag.DERIVED,
+    )
+
+
+@app.get("/api/logs/stream")
+async def stream_logs(
+    request: Request,
+    limit: int = 200,
+    levels: Optional[str] = None,
+    module: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    """Stream runtime logs over server-sent events."""
+    level_filter = _parse_log_levels(levels)
+    snapshot = live_log_stream.snapshot(
+        limit=min(max(limit, 1), 800),
+        levels=level_filter,
+        module=module,
+        search=search,
+    )
+    queue = live_log_stream.subscribe()
+
+    async def event_stream() -> AsyncIterator[str]:
+        try:
+            runtime_telemetry.note_websocket_heartbeat()
+            yield _sse_message(
+                "snapshot",
+                {
+                    "entries": snapshot,
+                    "count": len(snapshot),
+                    "available_modules": live_log_stream.available_modules(),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    entry = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    runtime_telemetry.note_websocket_heartbeat()
+                    yield _sse_message("heartbeat", {"timestamp": datetime.now().isoformat()})
+                    continue
+
+                if _log_entry_matches(entry, levels=level_filter, module=module, search=search):
+                    runtime_telemetry.note_websocket_heartbeat()
+                    yield _sse_message("log", entry)
+        finally:
+            live_log_stream.unsubscribe(queue)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+
+
 # === WebSocket ===
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
+    runtime_telemetry.note_websocket_heartbeat()
 
     # Send initial state
     await websocket.send_json({
@@ -3573,14 +4257,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 message = json.loads(data)
 
                 if message.get("type") == "ping":
+                    runtime_telemetry.note_websocket_heartbeat()
                     await websocket.send_json({"type": "pong"})
                 elif message.get("type") == "refresh":
+                    runtime_telemetry.note_websocket_heartbeat()
                     await websocket.send_json({
                         "type": "update",
                         "status": await get_status(),
                         "portfolio": await get_portfolio()
                     })
             except asyncio.TimeoutError:
+                runtime_telemetry.note_websocket_heartbeat()
                 await websocket.send_json({
                     "type": "heartbeat",
                     "status": await get_status(),
@@ -3598,6 +4285,7 @@ async def websocket_endpoint(websocket: WebSocket):
 async def websocket_v11_stream(websocket: WebSocket):
     """Compatibility decision stream for the Next.js decision component."""
     await websocket.accept()
+    runtime_telemetry.note_websocket_heartbeat()
     try:
         await websocket.send_json({
             "type": "init",
@@ -3609,8 +4297,10 @@ async def websocket_v11_stream(websocket: WebSocket):
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 message = json.loads(data)
                 if message.get("type") == "ping":
+                    runtime_telemetry.note_websocket_heartbeat()
                     await websocket.send_json({"type": "pong"})
             except asyncio.TimeoutError:
+                runtime_telemetry.note_websocket_heartbeat()
                 await websocket.send_json({
                     "type": "heartbeat",
                     "timestamp": datetime.now().isoformat(),
@@ -3637,6 +4327,7 @@ async def websocket_prices(websocket: WebSocket):
     """
     await websocket.accept()
     price_clients.append(websocket)
+    runtime_telemetry.note_websocket_heartbeat()
 
     try:
         # Determine source label matching frontend expectations
@@ -3649,6 +4340,7 @@ async def websocket_prices(websocket: WebSocket):
 
             for symbol, tick in all_prices.items():
                 if tick and tick.price > 0:
+                    runtime_telemetry.note_binance_data()
                     await websocket.send_json({
                         "type": "price",
                         "symbol": tick.symbol,
@@ -3668,9 +4360,11 @@ async def websocket_prices(websocket: WebSocket):
                 message = json.loads(data)
 
                 if message.get("type") == "ping":
+                    runtime_telemetry.note_websocket_heartbeat()
                     await websocket.send_json({"type": "pong"})
             except asyncio.TimeoutError:
                 # Send heartbeat
+                runtime_telemetry.note_websocket_heartbeat()
                 await websocket.send_json({"type": "heartbeat", "timestamp": datetime.now().isoformat()})
 
     except WebSocketDisconnect:
@@ -3682,6 +4376,8 @@ async def websocket_prices(websocket: WebSocket):
 
 async def broadcast_price_update(tick: PriceTick):
     """Receive price from real market data service and broadcast to WebSocket clients."""
+    runtime_telemetry.note_binance_data()
+
     # Update in-memory state so REST endpoints also return real prices
     if tick.symbol in ("BTC/USDT", "BTCUSDT"):
         state.current_price = tick.price
@@ -3743,7 +4439,6 @@ async def real_trading_loop():
     Fetches OHLCV data, runs strategies, executes real orders on Binance.
     Loops every 30 seconds.
     """
-    SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     LOOP_INTERVAL = 30  # seconds between signal checks
 
     logger.info("Real trading loop starting...")
@@ -3769,7 +4464,8 @@ async def real_trading_loop():
             if state.engine_status != "running":
                 _set_engine_status("running")
 
-            if not AGGRESSIVE_SCALPER_AVAILABLE or _aggressive_scalper_instance is None:
+            strategy = _sync_aggressive_scalper_runtime()
+            if not AGGRESSIVE_SCALPER_AVAILABLE or strategy is None:
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
 
@@ -3781,6 +4477,7 @@ async def real_trading_loop():
                     if k == "USDT":
                         usdt_free = v if isinstance(v, (int, float)) else v.get("free", 0)
                         break
+                strategy = _sync_aggressive_scalper_runtime(float(usdt_free))
                 if usdt_free < 10:
                     logger.warning(f"Insufficient USDT balance: ${usdt_free:.2f} — skipping cycle")
                     await asyncio.sleep(LOOP_INTERVAL)
@@ -3790,11 +4487,14 @@ async def real_trading_loop():
                 await asyncio.sleep(LOOP_INTERVAL)
                 continue
 
+            symbols = strategy.config.metadata.get("symbols", ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+            timeframe = strategy.config.metadata.get("timeframe", "5m")
+
             # Run strategy on each symbol
-            for symbol in SYMBOLS:
+            for symbol in symbols:
                 try:
                     # Get OHLCV candles
-                    candles = await state.exchange_client.get_ohlcv(symbol, timeframe="5m", limit=100)
+                    candles = await state.exchange_client.get_ohlcv(symbol, timeframe=timeframe, limit=100)
                     if not candles:
                         continue
                     df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -3805,25 +4505,23 @@ async def real_trading_loop():
                         state.current_price = current_price
 
                     # Set strategy symbol and generate signal
-                    _aggressive_scalper_instance.config.symbol = symbol
-                    signal = _aggressive_scalper_instance.generate_signal(
+                    strategy.config.symbol = symbol
+                    signal = strategy.generate_signal(
                         df, len(df) - 1, current_price
                     )
 
-                    if signal.action in ("BUY", "SELL") and signal.confidence >= 0.6:
-                        # Calculate order size
-                        position_usdt = usdt_free * 0.08  # 8% of free capital
-
-                        if position_usdt < 10:
+                    min_confidence = float(getattr(strategy.config, "min_confidence", 0.55) or 0.55)
+                    if signal.action in ("BUY", "SELL") and signal.confidence >= min_confidence:
+                        quantity = float(signal.size or 0.0)
+                        if quantity <= 0 or quantity * current_price < 10:
                             continue
 
                         side = "buy" if signal.action == "BUY" else "sell"
-                        quantity = position_usdt / current_price
 
                         logger.info(
                             f"SIGNAL: {signal.action} {symbol} @ {current_price:.4f} | "
                             f"qty={quantity:.6f} | confidence={signal.confidence:.2f} | "
-                            f"SL={signal.stop_loss:.4f} TP={signal.take_profit:.4f}"
+                            f"SL={(signal.stop_loss or 0.0):.4f} TP={(signal.take_profit or 0.0):.4f}"
                         )
 
                         # Place real order

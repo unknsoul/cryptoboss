@@ -22,7 +22,7 @@ import asyncio
 import logging
 import os
 import aiohttp
-from typing import Dict, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
@@ -290,6 +290,127 @@ class BinanceClient:
             
             self.exchange = exchange_class(config)
 
+    @staticmethod
+    def _normalize_symbol(symbol: str) -> str:
+        """Convert a slash-formatted symbol to Binance REST format."""
+        return symbol.replace("/", "").upper()
+
+    @staticmethod
+    def _restore_symbol(symbol: str) -> str:
+        """Convert a Binance REST symbol into the slash-separated form used internally."""
+        uppercase = symbol.upper()
+        for quote in ("USDT", "BUSD", "USDC", "BTC", "ETH", "BNB"):
+            if uppercase.endswith(quote) and len(uppercase) > len(quote):
+                return f"{uppercase[:-len(quote)]}/{quote}"
+        return uppercase
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float = 0.0) -> float:
+        """Best-effort float conversion for exchange payload values."""
+        try:
+            if value is None or value == "":
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _format_quantity(value: float) -> float:
+        """Round quantities to a practical exchange-safe precision."""
+        return float(f"{value:.8f}")
+
+    async def _sdk_call(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
+        """Run blocking python-binance SDK calls off the event loop."""
+        method = getattr(self.exchange, method_name)
+        return await asyncio.to_thread(method, *args, **kwargs)
+
+    def _normalize_ccxt_balances(self, balance: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+        """Normalize a ccxt balance payload into free/used/total buckets."""
+        totals = balance.get("total", {}) if isinstance(balance, dict) else {}
+        free_map = balance.get("free", {}) if isinstance(balance, dict) else {}
+        used_map = balance.get("used", {}) if isinstance(balance, dict) else {}
+        normalized: Dict[str, Dict[str, float]] = {}
+
+        for currency, total in totals.items():
+            total_value = self._coerce_float(total)
+            if total_value <= 0:
+                continue
+            normalized[currency] = {
+                "free": self._coerce_float(free_map.get(currency), total_value),
+                "used": self._coerce_float(used_map.get(currency), 0.0),
+                "total": total_value,
+            }
+
+        return normalized
+
+    def _normalize_sdk_balances(self, account: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+        """Normalize a python-binance account payload into free/used/total buckets."""
+        normalized: Dict[str, Dict[str, float]] = {}
+
+        for asset in account.get("balances", []):
+            free = self._coerce_float(asset.get("free"))
+            used = self._coerce_float(asset.get("locked"))
+            total = free + used
+            if total <= 0:
+                continue
+            normalized[str(asset.get("asset"))] = {
+                "free": free,
+                "used": used,
+                "total": total,
+            }
+
+        return normalized
+
+    @staticmethod
+    def _flatten_balances(balance_map: Dict[str, Dict[str, float]]) -> Dict[str, float]:
+        """Reduce normalized balances down to asset totals."""
+        return {
+            currency: float(values.get("total", 0.0))
+            for currency, values in balance_map.items()
+            if float(values.get("total", 0.0)) > 0
+        }
+
+    def _normalize_sdk_order(
+        self,
+        order: Dict[str, Any],
+        symbol: str,
+        side: str,
+        order_type: str,
+        fallback_quantity: float,
+        fallback_price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Map python-binance order responses to the ccxt-like shape used elsewhere."""
+        executed_qty = self._coerce_float(order.get("executedQty"), self._coerce_float(order.get("origQty"), fallback_quantity))
+        quote_qty = self._coerce_float(order.get("cummulativeQuoteQty"))
+        fills = order.get("fills", []) or []
+        fee_cost = sum(self._coerce_float(fill.get("commission")) for fill in fills)
+        avg_price = self._coerce_float(order.get("price"))
+
+        if executed_qty > 0:
+            if quote_qty > 0:
+                avg_price = quote_qty / executed_qty
+            elif fills:
+                fill_notional = sum(
+                    self._coerce_float(fill.get("price")) * self._coerce_float(fill.get("qty"))
+                    for fill in fills
+                )
+                avg_price = fill_notional / executed_qty if fill_notional > 0 else avg_price
+
+        if avg_price <= 0 and fallback_price is not None:
+            avg_price = float(fallback_price)
+
+        return {
+            **order,
+            "id": str(order.get("orderId", "")),
+            "symbol": symbol,
+            "side": str(order.get("side", side.upper())).lower(),
+            "type": str(order.get("type", order_type.upper())).lower(),
+            "price": avg_price,
+            "average": avg_price,
+            "filled": executed_qty,
+            "fee": {"cost": fee_cost},
+        }
+
     
     def _parse_binance_error(self, error: Exception) -> tuple:
         """
@@ -435,8 +556,8 @@ class BinanceClient:
             local_before = int(time.time() * 1000)
             
             if self._use_binance_sdk:
-                # python-binance SDK (sync)
-                server_time_response = self.exchange.get_server_time()
+                # python-binance SDK
+                server_time_response = await self._sdk_call("get_server_time")
                 server_time = server_time_response["serverTime"]
             else:
                 # ccxt (async)
@@ -500,7 +621,7 @@ class BinanceClient:
             logger.info("Step 2/3: Loading exchange info...")
             if self._use_binance_sdk:
                 # python-binance: get exchange info
-                exchange_info = self.exchange.get_exchange_info()
+                exchange_info = await self._sdk_call("get_exchange_info")
                 symbols_count = len(exchange_info.get('symbols', []))
                 self._connected = True
                 logger.info(f"  Loaded {symbols_count} symbols")
@@ -514,21 +635,14 @@ class BinanceClient:
             logger.info("Step 3/3: Authenticating...")
             if self._use_binance_sdk:
                 # python-binance: get account (matches user's working script)
-                account = self.exchange.get_account()
-                raw_balances = {}
-                for asset in account.get("balances", []):
-                    free = float(asset.get("free", 0))
-                    locked = float(asset.get("locked", 0))
-                    total = free + locked
-                    if total > 0:
-                        raw_balances[asset["asset"]] = total
+                account = await self._sdk_call("get_account")
+                normalized_balances = self._normalize_sdk_balances(account)
             else:
                 # ccxt
                 balance = await self.exchange.fetch_balance()
-                raw_balances = {
-                    k: v for k, v in balance.get('total', {}).items()
-                    if isinstance(v, (int, float)) and v > 0
-                }
+                normalized_balances = self._normalize_ccxt_balances(balance)
+
+            raw_balances = self._flatten_balances(normalized_balances)
             
             # Apply symbol validation filter to remove fake/junk assets
             if SYMBOL_VALIDATOR_AVAILABLE:
@@ -629,14 +743,8 @@ class BinanceClient:
             
             if self._use_binance_sdk:
                 # python-binance: get account (matches user's working script)
-                account = self.exchange.get_account()
-                raw_balances = {}
-                for asset in account.get("balances", []):
-                    free = float(asset.get("free", 0))
-                    locked = float(asset.get("locked", 0))
-                    total = free + locked
-                    if total > 0:
-                        raw_balances[asset["asset"]] = total
+                account = await self._sdk_call("get_account")
+                normalized_balances = self._normalize_sdk_balances(account)
                 self._connected = True
             else:
                 # ccxt
@@ -644,10 +752,9 @@ class BinanceClient:
                     await self.connect()
                 
                 balance = await self.exchange.fetch_balance()
-                raw_balances = {
-                    k: v for k, v in balance.get('total', {}).items()
-                    if isinstance(v, (int, float)) and v > 0
-                }
+                normalized_balances = self._normalize_ccxt_balances(balance)
+
+            raw_balances = self._flatten_balances(normalized_balances)
             
             # Apply symbol validation filter to remove fake/junk assets
             if SYMBOL_VALIDATOR_AVAILABLE:
@@ -706,17 +813,19 @@ class BinanceClient:
         try:
             if not self._connected:
                 await self.connect()
-            
-            balance_task = self.exchange.fetch_balance()
-            orders_task = self.exchange.fetch_open_orders()
-            
-            balance, orders = await asyncio.gather(balance_task, orders_task)
-            
-            balances = {
-                k: {"free": v.get("free", 0), "used": v.get("used", 0), "total": v.get("total", 0)}
-                for k, v in balance.items()
-                if isinstance(v, dict) and v.get("total", 0) > 0
-            }
+
+            if self._use_binance_sdk:
+                account, orders = await asyncio.gather(
+                    self._sdk_call("get_account"),
+                    self._sdk_call("get_open_orders"),
+                )
+                balances = self._normalize_sdk_balances(account)
+            else:
+                balance, orders = await asyncio.gather(
+                    self.exchange.fetch_balance(),
+                    self.exchange.fetch_open_orders(),
+                )
+                balances = self._normalize_ccxt_balances(balance)
             
             return {
                 "balances": balances,
@@ -738,19 +847,15 @@ class BinanceClient:
     
     # === REST API ===
     
-    async def get_balance(self) -> Dict[str, float]:
+    async def get_balance(self) -> Dict[str, Dict[str, float]]:
         """Get account balances."""
         try:
+            if self._use_binance_sdk:
+                account = await self._sdk_call("get_account")
+                return self._normalize_sdk_balances(account)
+
             balance = await self.exchange.fetch_balance()
-            return {
-                currency: {
-                    'free': data['free'],
-                    'used': data['used'],
-                    'total': data['total']
-                }
-                for currency, data in balance['total'].items()
-                if data and (isinstance(data, (int, float)) and data > 0)
-            }
+            return self._normalize_ccxt_balances(balance)
         except Exception as e:
             logger.error(self._format_error(e, "Failed to get balance"))
             return {}
@@ -758,7 +863,22 @@ class BinanceClient:
     async def get_ticker(self, symbol: str) -> Dict:
         """Get current ticker for a symbol."""
         try:
-            ticker = await self.exchange.fetch_ticker(symbol)
+            if self._use_binance_sdk:
+                symbol_clean = self._normalize_symbol(symbol)
+                raw_ticker = await self._sdk_call("get_ticker", symbol=symbol_clean)
+                ticker = {
+                    **raw_ticker,
+                    "symbol": symbol,
+                    "last": self._coerce_float(raw_ticker.get("lastPrice"), self._coerce_float(raw_ticker.get("price"))),
+                    "bid": self._coerce_float(raw_ticker.get("bidPrice")),
+                    "ask": self._coerce_float(raw_ticker.get("askPrice")),
+                    "high": self._coerce_float(raw_ticker.get("highPrice")),
+                    "low": self._coerce_float(raw_ticker.get("lowPrice")),
+                    "baseVolume": self._coerce_float(raw_ticker.get("volume")),
+                    "percentage": self._coerce_float(raw_ticker.get("priceChangePercent")),
+                }
+            else:
+                ticker = await self.exchange.fetch_ticker(symbol)
             self._prices[symbol] = ticker['last']
             return ticker
         except Exception as e:
@@ -783,14 +903,30 @@ class BinanceClient:
     ) -> Dict:
         """Create an order."""
         try:
-            order = await self.exchange.create_order(
-                symbol=symbol,
-                type=order_type,
-                side=side,
-                amount=amount,
-                price=price,
-                params=params or {}
-            )
+            if self._use_binance_sdk:
+                order_params: Dict[str, Any] = {
+                    "symbol": self._normalize_symbol(symbol),
+                    "side": side.upper(),
+                    "type": order_type.upper(),
+                    "quantity": self._format_quantity(amount),
+                    "newOrderRespType": "FULL",
+                }
+                if price is not None and order_type.lower() != "market":
+                    order_params["price"] = self._format_quantity(price)
+                    order_params.setdefault("timeInForce", "GTC")
+                if params:
+                    order_params.update(params)
+                raw_order = await self._sdk_call("create_order", **order_params)
+                order = self._normalize_sdk_order(raw_order, symbol, side, order_type, amount, price)
+            else:
+                order = await self.exchange.create_order(
+                    symbol=symbol,
+                    type=order_type,
+                    side=side,
+                    amount=amount,
+                    price=price,
+                    params=params or {}
+                )
             logger.info(f"Order created: {order['id']} - {side} {amount} {symbol}")
             return order
         except Exception as e:
@@ -801,7 +937,19 @@ class BinanceClient:
     async def cancel_order(self, order_id: str, symbol: str) -> Dict:
         """Cancel an order."""
         try:
-            result = await self.exchange.cancel_order(order_id, symbol)
+            if self._use_binance_sdk:
+                result = await self._sdk_call(
+                    "cancel_order",
+                    symbol=self._normalize_symbol(symbol),
+                    orderId=order_id,
+                )
+                result = {
+                    **result,
+                    "id": str(result.get("orderId", order_id)),
+                    "symbol": symbol,
+                }
+            else:
+                result = await self.exchange.cancel_order(order_id, symbol)
             logger.info(f"Order cancelled: {order_id}")
             return result
         except Exception as e:
@@ -812,15 +960,45 @@ class BinanceClient:
     async def fetch_order(self, order_id: str, symbol: str) -> Dict:
         """Fetch order status."""
         try:
+            if self._use_binance_sdk:
+                raw_order = await self._sdk_call(
+                    "get_order",
+                    symbol=self._normalize_symbol(symbol),
+                    orderId=order_id,
+                )
+                return self._normalize_sdk_order(
+                    raw_order,
+                    symbol,
+                    str(raw_order.get("side", "")).lower(),
+                    str(raw_order.get("type", "")).lower(),
+                    self._coerce_float(raw_order.get("origQty")),
+                    self._coerce_float(raw_order.get("price")),
+                )
             return await self.exchange.fetch_order(order_id, symbol)
         except Exception as e:
             error_msg = self._format_error(e, f"Failed to fetch order {order_id}")
             logger.error(error_msg)
             raise Exception(error_msg)
     
-    async def get_open_orders(self, symbol: str = None) -> List[Dict]:
+    async def get_open_orders(self, symbol: Optional[str] = None) -> List[Dict]:
         """Get all open orders."""
         try:
+            if self._use_binance_sdk:
+                kwargs: Dict[str, Any] = {}
+                if symbol:
+                    kwargs["symbol"] = self._normalize_symbol(symbol)
+                orders = await self._sdk_call("get_open_orders", **kwargs)
+                return [
+                    self._normalize_sdk_order(
+                        order,
+                        symbol or self._restore_symbol(str(order.get("symbol", ""))),
+                        str(order.get("side", "")).lower(),
+                        str(order.get("type", "")).lower(),
+                        self._coerce_float(order.get("origQty")),
+                        self._coerce_float(order.get("price")),
+                    )
+                    for order in orders
+                ]
             return await self.exchange.fetch_open_orders(symbol)
         except Exception as e:
             logger.error(self._format_error(e, "Failed to get open orders"))
@@ -856,6 +1034,24 @@ class BinanceClient:
     ) -> List:
         """Get OHLCV candlestick data."""
         try:
+            if self._use_binance_sdk:
+                raw_klines = await self._sdk_call(
+                    "get_klines",
+                    symbol=self._normalize_symbol(symbol),
+                    interval=timeframe,
+                    limit=limit,
+                )
+                return [
+                    [
+                        int(kline[0]),
+                        self._coerce_float(kline[1]),
+                        self._coerce_float(kline[2]),
+                        self._coerce_float(kline[3]),
+                        self._coerce_float(kline[4]),
+                        self._coerce_float(kline[5]),
+                    ]
+                    for kline in raw_klines
+                ]
             return await self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         except Exception as e:
             logger.error(self._format_error(e, "Failed to get OHLCV"))
