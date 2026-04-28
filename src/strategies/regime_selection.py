@@ -4,10 +4,23 @@ Regime detection and adaptive strategy switching.
 """
 
 import logging
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional
 from enum import Enum
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from src.data.schema import standardize_ohlcv
+
+try:
+    from src.regime import RegimeDetector as AdvancedRegimeDetector
+    from src.regime import load_regime_params, get_regime_params
+    ADVANCED_REGIME_AVAILABLE = True
+except Exception:  # pragma: no cover
+    ADVANCED_REGIME_AVAILABLE = False
+    AdvancedRegimeDetector = None
+    load_regime_params = None
+    get_regime_params = None
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +70,7 @@ class RegimeDetector:
         Returns:
             MarketRegime enum
         """
+        df = standardize_ohlcv(df, keep_extra_columns=True)
         # Get latest data
         if len(df) < 50:
             return MarketRegime.RANGING
@@ -142,6 +156,8 @@ class StrategySelector:
         self.current_strategy = None
         self.strategy_history: List[Dict] = []
         self.regime_detector = RegimeDetector()
+        self.advanced_detector = AdvancedRegimeDetector() if ADVANCED_REGIME_AVAILABLE else None
+        self.regime_params = load_regime_params() if ADVANCED_REGIME_AVAILABLE else {}
         
         logger.info("StrategySelector initialized")
     
@@ -173,6 +189,22 @@ class StrategySelector:
             self.current_strategy = strategy
         
         return strategy
+
+    def select_strategy_weights(self, df: pd.DataFrame) -> Dict[str, float]:
+        """Return per-strategy weights based on advanced regime detection."""
+        if not ADVANCED_REGIME_AVAILABLE or self.advanced_detector is None:
+            fallback = self.select_strategy(df)
+            return {fallback: 1.0}
+
+        snapshot = self.advanced_detector.detect(df)
+        params = get_regime_params(snapshot.regime, self.regime_params)
+        return params.get("strategy_weights", {}) if isinstance(params, dict) else {}
+
+    def current_regime_snapshot(self, df: pd.DataFrame):
+        """Return advanced regime snapshot when available."""
+        if not ADVANCED_REGIME_AVAILABLE or self.advanced_detector is None:
+            return None
+        return self.advanced_detector.detect(df)
     
     def get_strategy_performance(self) -> Dict:
         """Get performance statistics by strategy."""

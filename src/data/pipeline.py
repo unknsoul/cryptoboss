@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover - optional dependency fallback
     wait_exponential = None
 
 from src.core.event_bus import Event, EventBus, EventType, get_event_bus
+from src.data.schema import OHLCV_COLUMNS, standardize_ohlcv
 
 logger = logging.getLogger(__name__)
 
@@ -109,31 +110,7 @@ class DataPipeline:
 
     def normalize_ohlcv(self, raw_data: Any) -> pd.DataFrame:
         """Normalize raw OHLCV rows into a canonical DataFrame schema."""
-        if isinstance(raw_data, pd.DataFrame):
-            df = raw_data.copy()
-        else:
-            df = pd.DataFrame(raw_data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-
-        required = ["timestamp", "open", "high", "low", "close", "volume"]
-        for col in required:
-            if col not in df.columns:
-                raise ValueError(f"Missing OHLCV column: {col}")
-
-        df = df[required].copy()
-        for col in ["open", "high", "low", "close", "volume"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        timestamp_series = pd.to_numeric(df["timestamp"], errors="coerce")
-        if timestamp_series.notna().all():
-            df["timestamp"] = pd.to_datetime(timestamp_series.astype("int64"), unit="ms", utc=True)
-        else:
-            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-
-        df = df.dropna(subset=required)
-        df = df.drop_duplicates(subset=["timestamp"], keep="last")
-        df = df.sort_values("timestamp")
-
-        return df[["open", "high", "low", "close", "volume", "timestamp"]].reset_index(drop=True)
+        return standardize_ohlcv(raw_data)
 
     async def on_candle_close(self, symbol: str, timeframe: str, candle: Any) -> None:
         """Handle a closed candle update and emit the OHLCV update event."""
@@ -167,7 +144,7 @@ class DataPipeline:
         """Return latest candles from in-memory cache."""
         frame = self._cache.get(symbol, {}).get(timeframe)
         if frame is None:
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "timestamp"])
+            return pd.DataFrame(columns=OHLCV_COLUMNS)
         return frame.tail(n_bars).reset_index(drop=True)
 
     async def reconnect_on_failure(self) -> bool:
