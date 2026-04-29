@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 import logging
+from src.data.schema import model_feature_columns
 
 try:
     import xgboost as xgb
@@ -64,27 +65,27 @@ class MLPipeline:
         self,
         df: pd.DataFrame,
         horizon: int = 4,
-        threshold_pct: float = 0.5
+        threshold_pct: float = 0.5,
+        method: str = "threshold",
+        triple_barrier_config: Optional[Any] = None,
     ) -> pd.Series:
         """
         Create forward-looking labels.
-        
-        Label: 1 if price increases > threshold_pct in next `horizon` bars, else 0
-        
-        Args:
-            df: DataFrame with 'close' column
-            horizon: Forward-looking periods
-            threshold_pct: Minimum % move to be positive
-            
-        Returns:
-            Series with labels (1 or 0)
+
+        Methods:
+        - threshold: price change over horizon
+        - triple_barrier: Lopez de Prado triple barrier
         """
-        future_return = (df['close'].shift(-horizon) - df['close']) / df['close'] * 100
+        if method == "triple_barrier":
+            from src.labels.triple_barrier import TripleBarrierConfig, apply_triple_barrier
+
+            config = triple_barrier_config or TripleBarrierConfig()
+            return apply_triple_barrier(df, config)
+
+        future_return = (df["close"].shift(-horizon) - df["close"]) / df["close"] * 100
         labels = (future_return > threshold_pct).astype(int)
-        
-        # Drop last `horizon` rows (no labels)
+
         labels.iloc[-horizon:] = np.nan
-        
         logger.info(f"Created labels: {labels.sum()} positive, {(labels==0).sum()} negative")
         return labels
     
@@ -114,7 +115,7 @@ class MLPipeline:
         Returns:
             WalkForwardResult with aggregated metrics
         """
-        feature_cols = [col for col in features.columns if col not in ['open', 'high', 'low', 'close', 'volume']]
+        feature_cols = model_feature_columns(features)
         
         all_predictions = []
         all_actuals = []
@@ -229,6 +230,106 @@ class MLPipeline:
             all_actuals=all_actuals,
             feature_importance=avg_feature_importance
         )
+
+    def train_walk_forward_purged(
+        self,
+        features: pd.DataFrame,
+        labels: pd.Series,
+        train_size: int = 1000,
+        test_size: int = 200,
+        step_size: int = 100,
+        gap: int = 200,
+        embargo: int = 0,
+    ) -> WalkForwardResult:
+        """Walk-forward validation with gap and embargo to reduce leakage."""
+        from src.backtest.walk_forward import walk_forward_splits
+
+        feature_cols = model_feature_columns(features)
+        all_predictions = []
+        all_actuals = []
+        feature_importance_sum = {}
+        periods = 0
+
+        for split in walk_forward_splits(
+            n_samples=len(features),
+            train_size=train_size,
+            test_size=test_size,
+            step_size=step_size,
+            gap=gap,
+            embargo=embargo,
+        ):
+            X_train = features[feature_cols].iloc[split.train_start:split.train_end]
+            y_train = labels.iloc[split.train_start:split.train_end]
+            X_test = features[feature_cols].iloc[split.test_start:split.test_end]
+            y_test = labels.iloc[split.test_start:split.test_end]
+
+            train_valid = ~(X_train.isna().any(axis=1) | y_train.isna())
+            test_valid = ~(X_test.isna().any(axis=1) | y_test.isna())
+            X_train = X_train[train_valid]
+            y_train = y_train[train_valid]
+            X_test = X_test[test_valid]
+            y_test = y_test[test_valid]
+
+            if len(X_train) < 100 or len(X_test) < 10:
+                continue
+
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+
+            if self.model_type == 'xgboost':
+                model = xgb.XGBClassifier(
+                    n_estimators=100,
+                    max_depth=5,
+                    learning_rate=0.1,
+                    random_state=42
+                )
+            else:
+                model = RandomForestClassifier(
+                    n_estimators=100,
+                    max_depth=10,
+                    random_state=42
+                )
+
+            model.fit(X_train_scaled, y_train)
+            predictions = model.predict(X_test_scaled)
+
+            all_predictions.append(predictions)
+            all_actuals.append(y_test.values)
+
+            if hasattr(model, 'feature_importances_'):
+                for feature, importance in zip(feature_cols, model.feature_importances_):
+                    feature_importance_sum[feature] = feature_importance_sum.get(feature, 0) + importance
+
+            periods += 1
+
+        all_pred_flat = np.concatenate(all_predictions) if all_predictions else np.array([])
+        all_actual_flat = np.concatenate(all_actuals) if all_actuals else np.array([])
+        accuracy = (all_pred_flat == all_actual_flat).mean() if all_pred_flat.size else 0.0
+
+        true_positives = ((all_pred_flat == 1) & (all_actual_flat == 1)).sum() if all_pred_flat.size else 0
+        false_positives = ((all_pred_flat == 1) & (all_actual_flat == 0)).sum() if all_pred_flat.size else 0
+        false_negatives = ((all_pred_flat == 0) & (all_actual_flat == 1)).sum() if all_pred_flat.size else 0
+
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+
+        avg_feature_importance = {
+            feature: importance / max(periods, 1)
+            for feature, importance in feature_importance_sum.items()
+        }
+
+        avg_feature_importance = dict(sorted(avg_feature_importance.items(), key=lambda x: x[1], reverse=True))
+
+        return WalkForwardResult(
+            periods=periods,
+            avg_accuracy=accuracy,
+            avg_precision=precision,
+            avg_recall=recall,
+            all_predictions=all_predictions,
+            all_actuals=all_actuals,
+            feature_importance=avg_feature_importance,
+        )
     
     def train_final_model(
         self,
@@ -245,7 +346,7 @@ class MLPipeline:
         Returns:
             (model, scaler, feature_list)
         """
-        feature_cols = [col for col in features.columns if col not in ['open', 'high', 'low', 'close', 'volume']]
+        feature_cols = model_feature_columns(features)
         
         # Drop NaN
         valid = ~(features[feature_cols].isna().any(axis=1) | labels.isna())

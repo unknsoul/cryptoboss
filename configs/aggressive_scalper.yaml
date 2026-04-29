@@ -1,14 +1,14 @@
 strategy:
   id: aggressive_scalper_v1
-  version: "2.0"
+  version: "3.0"
   type: AggressiveScalper
   enabled: true
 
 rsi:
   period: 7
   fast_period: 4
-  oversold: 28
-  overbought: 72
+  oversold: 32
+  overbought: 68
 
 macd:
   fast: 6
@@ -24,43 +24,58 @@ atr:
 
 volume:
   ma_period: 14
-  spike_threshold: 1.4
+  spike_threshold: 1.3
 
 adx:
   period: 10
-  min_trend: 18
+  min_trend: 15
 
 risk:
-  stop_loss_atr_mult: 0.6
-  take_profit_1_mult: 1.5
-  take_profit_2_mult: 2.8
-  take_profit_3_mult: 4.2
-  max_position_pct: 8.0
-  max_risk_pct_per_trade: 0.01
+  stop_loss_atr_mult: 0.55
+  take_profit_1_mult: 1.8
+  take_profit_2_mult: 3.0
+  take_profit_3_mult: 5.0
+  max_position_pct: 6.0
+  max_risk_pct_per_trade: 0.0075
   leverage: 1
 
 scaling:
   auto_partial_close: true
-  partial_close_pct_at_tp1: 0.5
+  partial_close_pct_at_tp1: 0.4
   move_sl_to_be_at_tp1: true
   trailing_stop_after_tp1: true
   trailing_atr_mult: 1.0
 
 guards:
-  max_trades_per_hour: 15
-  max_concurrent_positions: 4
-  daily_loss_halt_pct: 4.0
-  weekly_loss_halt_pct: 8.0
-  cooldown_seconds: 45
+  max_trades_per_hour: 12
+  max_concurrent_positions: 3
+  daily_loss_halt_pct: 3.0
+  weekly_loss_halt_pct: 6.0
+  cooldown_seconds: 30
   min_confluence: 3
 
 symbols:
   - BTC/USDT
   - ETH/USDT
   - SOL/USDT
-  - BNB/USDT
-  - XRP/USDT
-  - DOGE/USDT
 
 timeframe: "1m"
 secondary_timeframe: "5m"
+tertiary_timeframe: "15m"
+
+guards:
+  max_trades_per_hour: 12
+  max_concurrent_positions: 3
+  daily_loss_halt_pct: 3.0
+  weekly_loss_halt_pct: 6.0
+  cooldown_seconds: 30
+  min_confluence: 3
+
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
+
+timeframe: "1m"
+secondary_timeframe: "5m"
+tertiary_timeframe: "15m"

@@ -345,3 +345,134 @@ def test_active_account_endpoint_restores_runtime_from_persisted_selection(clien
     assert payload["connection_status"] == "connected"
     assert payload["engine_status"] == "running"
     assert payload["account"]["api_key_fingerprint"] == "abcd1234"
+
+
+def test_open_managed_trade_creates_runtime_position(client):
+    """Opening a managed trade should populate runtime trade and position state."""
+    if not dashboard_api.TRADE_MANAGEMENT_AVAILABLE or not dashboard_api.AGGRESSIVE_SCALPER_AVAILABLE:
+        pytest.skip("Managed trade stack is unavailable in this environment")
+
+    class FakeExchangeClient:
+        async def create_order(self, **kwargs):
+            return {
+                "id": "entry-1",
+                "average": 100.0,
+                "price": 100.0,
+                "fee": {"cost": 0.05},
+                **kwargs,
+            }
+
+    dashboard_api.state.exchange_client = FakeExchangeClient()
+    dashboard_api.state.initial_capital = 1000.0
+    dashboard_api.state.capital = 1000.0
+    strategy = dashboard_api.AggressiveScalper()
+    strategy.set_account_balance(1000.0)
+
+    signal = type(
+        "Signal",
+        (),
+        {
+            "action": "BUY",
+            "size": 0.2,
+            "stop_loss": 99.0,
+            "take_profit": 102.8,
+            "confidence": 0.81,
+            "reason": "test_entry",
+            "metadata": {"tp1": 101.4, "tp2": 102.8, "tp3": 104.2},
+        },
+    )()
+
+    async def run_open():
+        event = await dashboard_api._open_managed_trade(
+            strategy=strategy,
+            symbol="BTC/USDT",
+            signal=signal,
+            current_price=100.0,
+            balance_map={"USDT": {"free": 1000.0, "total": 1000.0}},
+        )
+        dashboard_api._sync_open_positions_view({"BTC/USDT": 100.0})
+        return event
+
+    event = asyncio.run(run_open())
+
+    assert event is not None
+    assert event["event_type"] == "OPEN"
+    assert len(dashboard_api.state.managed_trades) == 1
+    assert dashboard_api.state.position == pytest.approx(0.2)
+    assert dashboard_api.state.position_entry_price == pytest.approx(100.0)
+    assert dashboard_api.state.trades[-1]["trade_id"] == event["trade_id"]
+
+
+def test_manage_trade_closes_only_remaining_quantity(client):
+    """Managed exits should partial close correctly and only flatten the remaining size."""
+    if not dashboard_api.TRADE_MANAGEMENT_AVAILABLE or not dashboard_api.AGGRESSIVE_SCALPER_AVAILABLE:
+        pytest.skip("Managed trade stack is unavailable in this environment")
+
+    class FakeExchangeClient:
+        def __init__(self):
+            self.order_count = 0
+
+        async def create_order(self, **kwargs):
+            self.order_count += 1
+            if self.order_count == 1:
+                return {"id": "entry-1", "average": 100.0, "price": 100.0, "fee": {"cost": 0.05}, **kwargs}
+            if self.order_count == 2:
+                return {"id": "tp1-1", "average": 101.4, "price": 101.4, "fee": {"cost": 0.03}, **kwargs}
+            return {"id": "close-1", "average": 101.2, "price": 101.2, "fee": {"cost": 0.03}, **kwargs}
+
+    dashboard_api.state.exchange_client = FakeExchangeClient()
+    dashboard_api.state.initial_capital = 1000.0
+    dashboard_api.state.capital = 1000.0
+    strategy = dashboard_api.AggressiveScalper()
+    strategy.set_account_balance(1000.0)
+
+    signal = type(
+        "Signal",
+        (),
+        {
+            "action": "BUY",
+            "size": 0.2,
+            "stop_loss": 99.0,
+            "take_profit": 102.8,
+            "confidence": 0.81,
+            "reason": "test_entry",
+            "metadata": {"tp1": 101.4, "tp2": 102.8, "tp3": 104.2},
+        },
+    )()
+
+    async def run_management():
+        await dashboard_api._open_managed_trade(
+            strategy=strategy,
+            symbol="BTC/USDT",
+            signal=signal,
+            current_price=100.0,
+            balance_map={"USDT": {"free": 1000.0, "total": 1000.0}},
+        )
+        trade_id, trade = next(iter(dashboard_api.state.managed_trades.items()))
+        await dashboard_api._manage_trade_for_symbol(
+            trade_id=trade_id,
+            trade=trade,
+            strategy=strategy,
+            current_price=101.4,
+            atr_value=1.0,
+        )
+        remaining_trade = dashboard_api.state.managed_trades[trade_id]
+        await dashboard_api._manage_trade_for_symbol(
+            trade_id=trade_id,
+            trade=remaining_trade,
+            strategy=strategy,
+            current_price=101.2,
+            atr_value=1.0,
+            opposing_signal="SELL",
+        )
+
+    asyncio.run(run_management())
+
+    partial_events = [event for event in dashboard_api.state.trades if event.get("event_type") == "PARTIAL_CLOSE"]
+    close_events = [event for event in dashboard_api.state.trades if event.get("event_type") == "CLOSE"]
+
+    assert len(partial_events) == 1
+    assert partial_events[0]["amount"] == pytest.approx(0.1)
+    assert len(close_events) == 1
+    assert close_events[0]["amount"] == pytest.approx(0.1)
+    assert dashboard_api.state.managed_trades == {}
