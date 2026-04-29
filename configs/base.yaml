@@ -1,0 +1,30 @@
+data:
+  timeframes: ["1m", "5m", "15m", "1h", "4h", "1d"]
+  lookback_bars: 30000
+  use_orderbook: true
+  use_alternative: true
+
+features:
+  include_indicators: true
+  include_smc: true
+  include_statistical: true
+  include_microstructure: true
+  include_alternative: true
+
+models:
+  primary: "xgboost"
+  meta: "logistic"
+  ensemble_weights:
+    xgboost: 0.4
+    lightgbm: 0.35
+    catboost: 0.25
+
+risk:
+  max_daily_loss_pct: 0.05
+  max_drawdown_pct: 0.2
+  risk_per_trade: 0.015
+  kelly_fraction: 0.25
+
+execution:
+  limit_first_wait_seconds: 30
+  slippage_alert_bps: 5

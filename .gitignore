@@ -60,6 +60,9 @@ logs/
 !frontend/app/logs/
 !frontend/app/logs/**
 *.log
+error_log.txt
+run_output.txt
+test_output.txt
 data/*.csv
 data/*.json
 !data/.gitkeep

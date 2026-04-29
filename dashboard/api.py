@@ -10,6 +10,7 @@ Implements:
 
 import asyncio
 from collections import deque
+import copy
 import json
 import logging
 import random
@@ -170,6 +171,17 @@ except ImportError as e:
     AggressiveScalper = Any  # type: ignore
     ScalperParams = Any  # type: ignore
     logging.warning(f"AggressiveScalper not available: {e}")
+
+try:
+    from src.core import ManagedTrade, PositionSide, TPLevel, TradeManagementEngine
+    TRADE_MANAGEMENT_AVAILABLE = True
+except ImportError as e:
+    TRADE_MANAGEMENT_AVAILABLE = False
+    ManagedTrade = Any  # type: ignore
+    PositionSide = Any  # type: ignore
+    TPLevel = Any  # type: ignore
+    TradeManagementEngine = Any  # type: ignore
+    logging.warning(f"Trade management engine not available: {e}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Dashboard")
@@ -592,6 +604,8 @@ class DashboardState:
         self.trades: List[Dict] = []
         self.position = 0.0  # Comes from exchange
         self.position_entry_price = 0.0
+        self.managed_trades: Dict[str, Any] = {}
+        self.managed_trade_meta: Dict[str, Dict[str, Any]] = {}
         self.total_trades = 0
         self.winning_trades = 0
         self.losing_trades = 0
@@ -652,6 +666,8 @@ class DashboardState:
         self.trades = []
         self.position = 0.0
         self.position_entry_price = 0.0
+        self.managed_trades = {}
+        self.managed_trade_meta = {}
         self.total_trades = 0
         self.winning_trades = 0
         self.losing_trades = 0
@@ -695,6 +711,22 @@ class DashboardState:
 
     @property
     def unrealized_pnl(self) -> float:
+        if self.managed_trades and self.managed_trade_meta:
+            total = 0.0
+            for trade_id, trade in self.managed_trades.items():
+                meta = self.managed_trade_meta.get(trade_id, {})
+                quantity = float(meta.get("entry_quantity", getattr(trade, "size", 0.0)) or 0.0)
+                remaining_pct = float(getattr(trade, "remaining_size_pct", 100.0) or 0.0) / 100.0
+                current_qty = quantity * remaining_pct
+                current_price = float(meta.get("current_price", getattr(trade, "entry_price", 0.0)) or 0.0)
+                entry_price = float(getattr(trade, "entry_price", 0.0) or 0.0)
+                if not current_qty or not current_price or not entry_price:
+                    continue
+                if getattr(trade, "side", None) == PositionSide.SHORT:
+                    total += (entry_price - current_price) * current_qty
+                else:
+                    total += (current_price - entry_price) * current_qty
+            return round(total, 6)
         if self.position > 0:
             return (self.current_price - self.position_entry_price) * self.position
         return 0.0
@@ -705,9 +737,10 @@ class DashboardState:
 
     @property
     def win_rate(self) -> float:
-        if self.total_trades == 0:
+        closed_trades = self.winning_trades + self.losing_trades
+        if closed_trades == 0:
             return 0.0
-        return (self.winning_trades / self.total_trades) * 100
+        return (self.winning_trades / closed_trades) * 100
 
 state = DashboardState()
 
@@ -798,6 +831,520 @@ def _resolved_engine_status() -> str:
     if state.api_validated and state.exchange_client is not None:
         return state.engine_status
     return "stopped"
+
+
+REAL_TRADING_LOOP_INTERVAL_SECONDS = 10
+REAL_TRADING_SCANNER_CONCURRENCY = 6
+_trade_management_engine = (
+    TradeManagementEngine(move_sl_to_entry_plus_fees_pct=0.02, atr_trail_multiplier=1.0, min_lock_in_profit_pct=0.1)
+    if TRADE_MANAGEMENT_AVAILABLE
+    else None
+)
+
+
+def _active_bot_trading_state() -> Optional[Any]:
+    """Return the isolated bot trading state when an active bot exists."""
+    if not BOT_INSTANCE_AVAILABLE:
+        return None
+    bot = get_active_bot()
+    if bot is None:
+        return None
+    return getattr(bot, "trading_state", None)
+
+
+def _symbol_base_asset(symbol: str) -> str:
+    """Return the base asset for a slash-formatted symbol."""
+    if "/" in symbol:
+        return symbol.split("/")[0].upper()
+    return symbol.replace("USDT", "").upper()
+
+
+def _extract_available_balance(balance_map: Dict[str, Any], asset: str) -> float:
+    """Return the free balance for an asset from a normalized balance payload."""
+    raw_value = balance_map.get(asset, 0.0)
+    if isinstance(raw_value, dict):
+        return float(raw_value.get("free", raw_value.get("total", 0.0)) or 0.0)
+    return float(raw_value or 0.0)
+
+
+def _current_trade_quantity(trade: Any, meta: Dict[str, Any]) -> float:
+    """Return the remaining open quantity for a managed trade."""
+    entry_quantity = float(meta.get("entry_quantity", getattr(trade, "size", 0.0)) or 0.0)
+    remaining_pct = float(getattr(trade, "remaining_size_pct", 100.0) or 0.0) / 100.0
+    return round(max(entry_quantity * remaining_pct, 0.0), 8)
+
+
+def _position_direction(trade: Any) -> str:
+    """Return the user-facing side label for a managed trade."""
+    return "SHORT" if getattr(trade, "side", None) == PositionSide.SHORT else "LONG"
+
+
+def _position_unrealized_pnl(trade: Any, meta: Dict[str, Any], current_price: float) -> float:
+    """Compute unrealized PnL for the remaining quantity of a managed trade."""
+    quantity = _current_trade_quantity(trade, meta)
+    entry_price = float(getattr(trade, "entry_price", 0.0) or 0.0)
+    if quantity <= 0 or entry_price <= 0 or current_price <= 0:
+        return 0.0
+    if getattr(trade, "side", None) == PositionSide.SHORT:
+        return round((entry_price - current_price) * quantity, 6)
+    return round((current_price - entry_price) * quantity, 6)
+
+
+def _position_unrealized_pct(trade: Any, meta: Dict[str, Any], current_price: float) -> float:
+    """Return unrealized PnL as a percent of remaining notional."""
+    quantity = _current_trade_quantity(trade, meta)
+    entry_price = float(getattr(trade, "entry_price", 0.0) or 0.0)
+    if quantity <= 0 or entry_price <= 0:
+        return 0.0
+    basis = entry_price * quantity
+    pnl = _position_unrealized_pnl(trade, meta, current_price)
+    return round((pnl / basis) * 100.0, 4) if basis > 0 else 0.0
+
+
+def _build_position_snapshot(trade_id: str, trade: Any, meta: Dict[str, Any], current_price: float) -> Dict[str, Any]:
+    """Serialize an open managed trade into the dashboard position contract."""
+    quantity = _current_trade_quantity(trade, meta)
+    tp_levels = list(getattr(trade, "tp_levels", []) or [])
+    take_profit = tp_levels[-1].price if tp_levels else meta.get("tp3") or meta.get("tp2") or meta.get("tp1")
+    return {
+        "id": trade_id,
+        "trade_id": trade_id,
+        "symbol": getattr(trade, "symbol", meta.get("symbol", "BTC/USDT")),
+        "side": _position_direction(trade),
+        "quantity": quantity,
+        "size": quantity,
+        "entry_price": float(getattr(trade, "entry_price", 0.0) or 0.0),
+        "current_price": float(current_price or getattr(trade, "entry_price", 0.0) or 0.0),
+        "value_usd": round(quantity * float(current_price or 0.0), 6),
+        "pnl": _position_unrealized_pnl(trade, meta, float(current_price or 0.0)),
+        "pnl_pct": _position_unrealized_pct(trade, meta, float(current_price or 0.0)),
+        "entry_time": getattr(trade, "opened_at", datetime.now()).isoformat(),
+        "entry_reason": meta.get("entry_reason", "signal_entry"),
+        "stop_loss": float(getattr(trade, "stop_loss", 0.0) or 0.0),
+        "take_profit": float(take_profit or 0.0),
+        "take_profit_1": float(tp_levels[0].price) if len(tp_levels) > 0 else meta.get("tp1"),
+        "take_profit_2": float(tp_levels[1].price) if len(tp_levels) > 1 else meta.get("tp2"),
+        "take_profit_3": float(tp_levels[2].price) if len(tp_levels) > 2 else meta.get("tp3"),
+        "confidence": float(meta.get("confidence", 0.0) or 0.0),
+        "remaining_size_pct": float(getattr(trade, "remaining_size_pct", 100.0) or 0.0),
+        "trailing_active": bool(getattr(trade, "trailing_active", False)),
+        "moved_to_breakeven": bool(getattr(trade, "moved_to_breakeven", False)),
+        "order_id": meta.get("order_id"),
+    }
+
+
+def _sync_runtime_balances(balance_map: Dict[str, Any]) -> float:
+    """Update dashboard and bot balance mirrors from the latest exchange snapshot."""
+    usdt_free = _extract_available_balance(balance_map, "USDT")
+    state.capital = float(usdt_free)
+
+    trading_state = _active_bot_trading_state()
+    if trading_state is not None:
+        normalized = {
+            asset: (
+                float(value.get("total", 0.0) or 0.0)
+                if isinstance(value, dict)
+                else float(value or 0.0)
+            )
+            for asset, value in balance_map.items()
+        }
+        trading_state.balances = normalized
+
+    return usdt_free
+
+
+def _sync_open_positions_view(current_prices: Optional[Dict[str, float]] = None) -> None:
+    """Refresh dashboard and bot position views from managed trade state."""
+    current_prices = current_prices or {}
+    positions: List[Dict[str, Any]] = []
+    btc_position = 0.0
+    btc_entry_price = 0.0
+
+    for trade_id, trade in list(state.managed_trades.items()):
+        meta = state.managed_trade_meta.get(trade_id, {})
+        symbol = getattr(trade, "symbol", meta.get("symbol", "BTC/USDT"))
+        current_price = float(current_prices.get(symbol, meta.get("current_price", getattr(trade, "entry_price", 0.0)) or 0.0))
+        meta["current_price"] = current_price
+        snapshot = _build_position_snapshot(trade_id, trade, meta, current_price)
+        positions.append(snapshot)
+
+        if symbol == "BTC/USDT":
+            signed_qty = snapshot["quantity"] if snapshot["side"] == "LONG" else -snapshot["quantity"]
+            btc_position += signed_qty
+            btc_entry_price = snapshot["entry_price"]
+
+    trading_state = _active_bot_trading_state()
+    if trading_state is not None:
+        trading_state.positions = positions
+
+    state.position = round(btc_position, 8)
+    state.position_entry_price = round(btc_entry_price, 6) if btc_position else 0.0
+
+
+def _append_decision(decision_type: str, summary: str, **details: Any) -> None:
+    """Append a structured decision/event to the dashboard decision feed."""
+    now = datetime.now()
+    entry = {
+        "timestamp": now.isoformat(),
+        "type": decision_type,
+        "summary": summary,
+        **details,
+    }
+    state.recent_decisions.append(entry)
+    state.recent_decisions = state.recent_decisions[-200:]
+    state.last_decision_time = now
+    state.decisions_today += 1
+
+
+def _append_trade_event(event: Dict[str, Any]) -> None:
+    """Record a trade event in memory and the active bot trade history."""
+    state.trades.append(event)
+    state.trades = state.trades[-500:]
+
+    trading_state = _active_bot_trading_state()
+    if trading_state is not None:
+        trading_state.trade_history.append(event)
+        trading_state.trade_history = trading_state.trade_history[-500:]
+
+
+def _refresh_trade_statistics() -> None:
+    """Recompute runtime win/loss counters from completed trade events."""
+    trading_state = _active_bot_trading_state()
+    history = trading_state.trade_history if trading_state is not None else state.trades
+    closed_events = [event for event in history if event.get("event_type") == "CLOSE"]
+    wins = sum(1 for event in closed_events if float(event.get("pnl", 0.0) or 0.0) > 0)
+    losses = sum(1 for event in closed_events if float(event.get("pnl", 0.0) or 0.0) < 0)
+    total_pnl = sum(float(event.get("pnl", 0.0) or 0.0) for event in closed_events)
+
+    state.winning_trades = wins
+    state.losing_trades = losses
+    state.pnl = round(total_pnl, 6)
+
+    if trading_state is not None:
+        trading_state.total_pnl = round(total_pnl, 6)
+        trading_state.total_trades = len(closed_events)
+        trading_state.win_rate = round((wins / len(closed_events)) * 100.0, 4) if closed_events else 0.0
+        trading_state.last_trade_at = datetime.now() if history else trading_state.last_trade_at
+
+
+def _trade_id(symbol: str) -> str:
+    """Generate a stable unique trade identifier for a new managed trade."""
+    return f"{symbol.replace('/', '')}-{uuid.uuid4().hex[:10]}"
+
+
+def _tp_levels_from_signal(signal: Any) -> List[Any]:
+    """Build the 3-stage take-profit ladder from a signal payload."""
+    metadata = getattr(signal, "metadata", {}) or {}
+    tp1 = float(metadata.get("tp1", getattr(signal, "take_profit", 0.0)) or 0.0)
+    tp2 = float(metadata.get("tp2", getattr(signal, "take_profit", tp1)) or 0.0)
+    tp3 = float(metadata.get("tp3", tp2 or tp1) or 0.0)
+    return [
+        TPLevel(tp_id="tp1", price=tp1, close_pct=50.0),
+        TPLevel(tp_id="tp2", price=tp2, close_pct=30.0),
+        TPLevel(tp_id="tp3", price=tp3, close_pct=20.0),
+    ]
+
+
+def _trade_close_side(trade: Any) -> str:
+    """Return the exchange side needed to reduce or close a managed trade."""
+    return "buy" if getattr(trade, "side", None) == PositionSide.SHORT else "sell"
+
+
+def _trade_entry_side(signal_action: str) -> str:
+    """Map strategy action strings to exchange order sides."""
+    return "sell" if str(signal_action).upper() == "SELL" else "buy"
+
+
+def _has_open_trade_for_symbol(symbol: str) -> bool:
+    """Return True when a managed trade is already open on the symbol."""
+    for trade in state.managed_trades.values():
+        if getattr(trade, "symbol", None) == symbol and not getattr(trade, "closed", False):
+            return True
+    return False
+
+
+async def _open_managed_trade(
+    *,
+    strategy: Any,
+    symbol: str,
+    signal: Any,
+    current_price: float,
+    balance_map: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Execute a new managed trade entry when runtime guards allow it."""
+    if not TRADE_MANAGEMENT_AVAILABLE or state.exchange_client is None:
+        return None
+
+    current_open_positions = len(state.managed_trades)
+    if hasattr(strategy, "risk_engine") and not strategy.risk_engine.can_open_position(
+        current_open_positions=current_open_positions,
+        daily_pnl=state.pnl,
+        account_balance=max(float(state.initial_capital or state.capital or 10000.0), 1.0),
+    ):
+        _append_decision(
+            "PROPOSAL_REJECTED",
+            f"{symbol} blocked by open-position risk guard",
+            symbol=symbol,
+            action=signal.action,
+            reason="risk_guard_blocked_entry",
+        )
+        return None
+
+    if _has_open_trade_for_symbol(symbol):
+        return None
+
+    quantity = round(float(getattr(signal, "size", 0.0) or 0.0), 6)
+    if quantity <= 0:
+        return None
+
+    if str(signal.action).upper() == "BUY":
+        usdt_free = _extract_available_balance(balance_map, "USDT")
+        max_affordable = round((usdt_free * 0.98) / max(current_price, 0.0001), 6)
+        quantity = min(quantity, max_affordable)
+    else:
+        base_free = _extract_available_balance(balance_map, _symbol_base_asset(symbol))
+        quantity = min(quantity, round(base_free, 6))
+
+    if quantity <= 0 or quantity * current_price < 10:
+        _append_decision(
+            "PROPOSAL_REJECTED",
+            f"{symbol} blocked by insufficient free balance",
+            symbol=symbol,
+            action=signal.action,
+            reason="insufficient_available_balance",
+        )
+        return None
+
+    order = await state.exchange_client.create_order(
+        symbol=symbol,
+        side=_trade_entry_side(signal.action),
+        order_type="market",
+        amount=quantity,
+    )
+
+    fill_price = float(order.get("average", order.get("price", current_price)) or current_price)
+    trade_id = _trade_id(symbol)
+    managed_trade = ManagedTrade(
+        trade_id=trade_id,
+        symbol=symbol,
+        side=PositionSide.SHORT if str(signal.action).upper() == "SELL" else PositionSide.LONG,
+        entry_price=fill_price,
+        stop_loss=float(getattr(signal, "stop_loss", 0.0) or 0.0),
+        size=quantity,
+        opened_at=datetime.now(),
+        tp_levels=_tp_levels_from_signal(signal),
+    )
+    state.managed_trades[trade_id] = managed_trade
+    state.managed_trade_meta[trade_id] = {
+        "entry_quantity": quantity,
+        "entry_fees": float(order.get("fee", {}).get("cost", 0.0) or 0.0),
+        "entry_reason": getattr(signal, "reason", "signal_entry"),
+        "confidence": float(getattr(signal, "confidence", 0.0) or 0.0),
+        "order_id": order.get("id"),
+        "current_price": fill_price,
+        "realized_pnl": 0.0,
+        "closed_quantity": 0.0,
+        "status": "OPEN",
+        "symbol": symbol,
+        "side": str(signal.action).upper(),
+        "tp1": float((getattr(signal, "metadata", {}) or {}).get("tp1", getattr(signal, "take_profit", fill_price)) or fill_price),
+        "tp2": float((getattr(signal, "metadata", {}) or {}).get("tp2", getattr(signal, "take_profit", fill_price)) or fill_price),
+        "tp3": float((getattr(signal, "metadata", {}) or {}).get("tp3", getattr(signal, "take_profit", fill_price)) or fill_price),
+    }
+
+    state.total_trades += 1
+    trading_state = _active_bot_trading_state()
+    if trading_state is not None:
+        trading_state.daily_trades += 1
+        trading_state.last_trade_at = datetime.now()
+
+    event = {
+        "id": state.total_trades,
+        "trade_id": trade_id,
+        "event_type": "OPEN",
+        "time": datetime.now().isoformat(),
+        "symbol": symbol,
+        "side": str(signal.action).upper(),
+        "amount": quantity,
+        "price": round(fill_price, 6),
+        "entry_price": round(fill_price, 6),
+        "pnl": 0.0,
+        "reason": getattr(signal, "reason", "signal_entry")[:80],
+        "order_id": order.get("id", ""),
+        "confidence": float(getattr(signal, "confidence", 0.0) or 0.0),
+    }
+    _append_trade_event(event)
+    _append_decision(
+        "TRADE_EXECUTED",
+        f"{signal.action} {symbol} opened",
+        symbol=symbol,
+        side=str(signal.action).upper(),
+        price=round(fill_price, 6),
+        quantity=quantity,
+        trade_id=trade_id,
+        confidence=float(getattr(signal, "confidence", 0.0) or 0.0),
+    )
+    return event
+
+
+async def _manage_trade_for_symbol(
+    *,
+    trade_id: str,
+    trade: Any,
+    strategy: Any,
+    current_price: float,
+    atr_value: float,
+    opposing_signal: Optional[str] = None,
+) -> None:
+    """Advance TP/SL/trailing behavior for an open managed trade."""
+    if not TRADE_MANAGEMENT_AVAILABLE or _trade_management_engine is None or state.exchange_client is None:
+        return
+
+    meta = state.managed_trade_meta.get(trade_id)
+    if meta is None:
+        return
+
+    candidate = copy.deepcopy(trade)
+    if opposing_signal and (
+        (getattr(candidate, "side", None) == PositionSide.LONG and opposing_signal == "SELL")
+        or (getattr(candidate, "side", None) == PositionSide.SHORT and opposing_signal == "BUY")
+    ):
+        decision = type("Decision", (), {"actions": ["opposite_signal_exit", "close_remainder"], "close_pct": 100.0, "new_stop_loss": None, "close_all": True, "reason": "opposite signal"})()
+        candidate.closed = True
+        candidate.remaining_size_pct = 0.0
+    else:
+        decision = _trade_management_engine.evaluate(candidate, current_price, atr_value=atr_value)
+
+    if getattr(decision, "new_stop_loss", None) is not None:
+        meta["current_price"] = current_price
+        state.managed_trades[trade_id] = candidate
+
+    close_pct = float(getattr(decision, "close_pct", 0.0) or 0.0)
+    if close_pct <= 0:
+        return
+
+    current_open_quantity = _current_trade_quantity(trade, meta)
+    if getattr(decision, "close_all", False) or getattr(candidate, "closed", False):
+        close_quantity = round(current_open_quantity, 6)
+    else:
+        close_quantity = round(float(meta.get("entry_quantity", candidate.size) or 0.0) * (close_pct / 100.0), 6)
+    if close_quantity <= 0:
+        return
+
+    close_order = await state.exchange_client.create_order(
+        symbol=getattr(candidate, "symbol", meta.get("symbol", "BTC/USDT")),
+        side=_trade_close_side(candidate),
+        order_type="market",
+        amount=close_quantity,
+    )
+
+    exit_price = float(close_order.get("average", close_order.get("price", current_price)) or current_price)
+    entry_price = float(getattr(candidate, "entry_price", 0.0) or 0.0)
+    entry_fee_share = float(meta.get("entry_fees", 0.0) or 0.0) * (close_pct / 100.0)
+    exit_fees = float(close_order.get("fee", {}).get("cost", 0.0) or 0.0)
+    if getattr(candidate, "side", None) == PositionSide.SHORT:
+        realized_pnl = ((entry_price - exit_price) * close_quantity) - entry_fee_share - exit_fees
+    else:
+        realized_pnl = ((exit_price - entry_price) * close_quantity) - entry_fee_share - exit_fees
+    realized_pnl = round(realized_pnl, 6)
+
+    meta["realized_pnl"] = round(float(meta.get("realized_pnl", 0.0) or 0.0) + realized_pnl, 6)
+    meta["closed_quantity"] = round(float(meta.get("closed_quantity", 0.0) or 0.0) + close_quantity, 6)
+    meta["current_price"] = current_price
+    meta["status"] = "CLOSED" if getattr(decision, "close_all", False) or getattr(candidate, "closed", False) else "PARTIAL"
+
+    state.pnl = round(state.pnl + realized_pnl, 6)
+    event_type = "CLOSE" if getattr(decision, "close_all", False) or getattr(candidate, "closed", False) else "PARTIAL_CLOSE"
+    event = {
+        "id": len(state.trades) + 1,
+        "trade_id": trade_id,
+        "event_type": event_type,
+        "time": datetime.now().isoformat(),
+        "symbol": getattr(candidate, "symbol", meta.get("symbol", "BTC/USDT")),
+        "side": _position_direction(candidate),
+        "amount": close_quantity,
+        "price": round(exit_price, 6),
+        "entry_price": round(entry_price, 6),
+        "pnl": realized_pnl,
+        "pnl_pct": round((realized_pnl / max(entry_price * close_quantity, 1e-9)) * 100.0, 4),
+        "reason": getattr(decision, "reason", "management_exit"),
+        "closed_at": datetime.now().isoformat(),
+        "order_id": close_order.get("id", ""),
+        "actions": list(getattr(decision, "actions", [])),
+    }
+    _append_trade_event(event)
+    _append_decision(
+        "EXIT" if event_type == "CLOSE" else "PARTIAL_CLOSE",
+        f"{event_type.replace('_', ' ')} {event['symbol']}",
+        symbol=event["symbol"],
+        trade_id=trade_id,
+        pnl=realized_pnl,
+        close_pct=close_pct,
+        actions=event["actions"],
+    )
+
+    if getattr(decision, "close_all", False) or getattr(candidate, "closed", False):
+        total_trade_pnl = float(meta.get("realized_pnl", 0.0) or 0.0)
+        if total_trade_pnl > 0:
+            state.winning_trades += 1
+        elif total_trade_pnl < 0:
+            state.losing_trades += 1
+        state.managed_trades.pop(trade_id, None)
+    else:
+        state.managed_trades[trade_id] = candidate
+
+    if state.exchange_client is not None:
+        try:
+            balance = await state.exchange_client.get_balance()
+            _sync_runtime_balances(balance)
+        except Exception as balance_error:
+            logger.warning("Failed to refresh balances after trade management for %s: %s", trade_id, balance_error)
+
+    _refresh_trade_statistics()
+
+
+async def _fetch_symbol_snapshot(symbol: str, timeframe: str, limit: int = 100) -> Optional[Dict[str, Any]]:
+    """Fetch the latest candle snapshot for one symbol."""
+    if state.exchange_client is None:
+        return None
+    started_at = time.perf_counter()
+    candles = await state.exchange_client.get_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    if not candles:
+        return None
+    runtime_telemetry.note_binance_data()
+    df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    current_price = float(df["close"].iloc[-1])
+    strategy = _resolve_aggressive_scalper()
+    atr_value = 0.0
+    if strategy is not None:
+        atr_series = strategy._atr(df, strategy.params.atr_period)
+        atr_value = float(atr_series.iloc[-1]) if not atr_series.empty and not pd.isna(atr_series.iloc[-1]) else 0.0
+    return {
+        "symbol": symbol,
+        "df": df,
+        "current_price": current_price,
+        "atr_value": 0.0 if pd.isna(atr_value) else atr_value,
+        "fetch_ms": round((time.perf_counter() - started_at) * 1000.0, 2),
+    }
+
+
+async def _gather_symbol_snapshots(symbols: List[str], timeframe: str) -> List[Dict[str, Any]]:
+    """Fetch market snapshots for all active symbols with bounded concurrency."""
+    semaphore = asyncio.Semaphore(REAL_TRADING_SCANNER_CONCURRENCY)
+
+    async def _wrapped(symbol: str) -> Optional[Dict[str, Any]]:
+        async with semaphore:
+            return await _fetch_symbol_snapshot(symbol, timeframe)
+
+    results = await asyncio.gather(*[_wrapped(symbol) for symbol in symbols], return_exceptions=True)
+    snapshots: List[Dict[str, Any]] = []
+    for symbol, result in zip(symbols, results):
+        if isinstance(result, Exception):
+            logger.error(f"Snapshot fetch failed for {symbol}: {result}")
+            continue
+        if result:
+            snapshots.append(result)
+    return snapshots
 
 
 def _resolve_runtime_engine() -> Optional[Any]:
@@ -2585,25 +3132,37 @@ async def get_portfolio():
         if bot:
             trading_state = bot.trading_state
             positions = []
+            usdt_balance = float(trading_state.balances.get("USDT", 0.0) or 0.0)
+            positions_value = 0.0
 
             # Only show positions if they exist in THIS bot instance
             for pos in trading_state.positions:
+                current_price = float(pos.get("current_price", state.current_price) or state.current_price or 0.0)
+                quantity = float(pos.get("quantity", pos.get("size", 0.0)) or 0.0)
+                pnl = float(pos.get("pnl", pos.get("unrealized_pnl", pos.get("unrealizedPnL", 0.0))) or 0.0)
+                pnl_pct = float(pos.get("pnl_pct", pos.get("pnlPercent", 0.0)) or 0.0)
+                value_usd = float(pos.get("value_usd", pos.get("exposure", quantity * current_price)) or 0.0)
+                positions_value += value_usd
                 positions.append({
                     "symbol": pos.get("symbol", "BTC/USDT"),
-                    "quantity": pos.get("quantity", 0),
-                    "entry_price": pos.get("entry_price", 0),
-                    "current_price": state.current_price,
-                    "value_usd": pos.get("quantity", 0) * state.current_price,
-                    "pnl": pos.get("pnl", 0),
-                    "pnl_pct": pos.get("pnl_pct", 0)
+                    "quantity": quantity,
+                    "entry_price": float(pos.get("entry_price", pos.get("entryPrice", 0.0)) or 0.0),
+                    "current_price": current_price,
+                    "value_usd": value_usd,
+                    "pnl": pnl,
+                    "pnl_pct": pnl_pct,
+                    "side": pos.get("side", "LONG"),
+                    "entry_time": pos.get("entry_time", pos.get("entryTime")),
+                    "stop_loss": pos.get("stop_loss", pos.get("stopLoss")),
+                    "take_profit": pos.get("take_profit", pos.get("takeProfit")),
                 })
 
             return wrap_legacy_response({
                 "balance": trading_state.balances if trading_state.balances else {"USDT": 10000.0, "BTC": 0.0},
                 "positions": positions,  # Empty for new accounts
-                "total_value_usd": sum(trading_state.balances.values()) if trading_state.balances else 10000.0,
+                "total_value_usd": round(usdt_balance + positions_value, 6) if trading_state.balances else 10000.0,
                 "daily_pnl": trading_state.total_pnl,
-                "daily_pnl_pct": (trading_state.total_pnl / 10000 * 100) if trading_state.total_pnl else 0,
+                "daily_pnl_pct": (trading_state.total_pnl / max(state.initial_capital or 10000.0, 1.0) * 100) if trading_state.total_pnl else 0,
                 "is_new_account": len(trading_state.trade_history) == 0
             })
         else:
@@ -2673,7 +3232,7 @@ def _map_position(position: Dict[str, Any], idx: int) -> Dict[str, Any]:
 def _closed_positions_today(limit: int = 50) -> List[Dict[str, Any]]:
     closed = []
     for idx, trade in enumerate(state.trades[-limit:]):
-        if str(trade.get("side", "")).upper() != "SELL":
+        if trade.get("event_type") not in {"CLOSE", "PARTIAL_CLOSE"}:
             continue
         exit_price = float(trade.get("price", 0) or 0)
         size = float(trade.get("amount", trade.get("quantity", 0)) or 0)
@@ -2681,7 +3240,7 @@ def _closed_positions_today(limit: int = 50) -> List[Dict[str, Any]]:
         closed.append({
             "id": trade.get("id", idx + 1),
             "symbol": trade.get("symbol", "BTC/USDT"),
-            "side": "LONG",
+            "side": trade.get("side", "LONG"),
             "entryPrice": float(trade.get("entry_price", 0) or 0),
             "exitPrice": exit_price,
             "size": size,
@@ -3144,19 +3703,20 @@ async def get_pnl_history(limit: int = 200):
                     "side": t.get("side", ""),
                 }
                 for t in raw
+                if t.get("event_type") in {"CLOSE", "PARTIAL_CLOSE"}
             ]
 
     # Fallback to in-memory state trades
     if not trades:
-        trades = [
-            {
-                "pnl": t.get("pnl", 0),
-                "symbol": t.get("symbol", "BTC/USDT"),
-                "closed_at": t.get("time", ""),
-                "side": t.get("side", ""),
-            }
-            for t in state.trades[-limit:]
-            if t.get("pnl") is not None
+            trades = [
+                {
+                    "pnl": t.get("pnl", 0),
+                    "symbol": t.get("symbol", "BTC/USDT"),
+                    "closed_at": t.get("time", ""),
+                    "side": t.get("side", ""),
+                }
+                for t in state.trades[-limit:]
+                if t.get("pnl") is not None and t.get("event_type") in {"CLOSE", "PARTIAL_CLOSE"}
         ]
 
     if not trades:
@@ -3903,6 +4463,9 @@ async def start_engine(config: EngineConfig):
     state.mode = mode
     state.pnl = 0.0
     state.position = 0.0
+    state.position_entry_price = 0.0
+    state.managed_trades = {}
+    state.managed_trade_meta = {}
     state.trades = []
     state.total_trades = 0
     state.winning_trades = 0
@@ -4432,6 +4995,115 @@ async def broadcast_price_update(tick: PriceTick):
 _trading_loop_task = None
 
 
+async def _run_real_trading_cycle() -> None:
+    """Run one full live trading cycle across all configured symbols."""
+    if state.engine_status == "stopped":
+        return
+
+    if state.exchange_client is None or not state.api_validated:
+        return
+
+    if state.kill_switch_active or state.trading_paused or state.incident_state != "NORMAL":
+        if state.engine_status != "paused":
+            _set_engine_status("paused")
+        logger.info("Trading loop paused by control state")
+        return
+
+    if state.engine_status != "running":
+        _set_engine_status("running")
+
+    strategy = _sync_aggressive_scalper_runtime()
+    if not AGGRESSIVE_SCALPER_AVAILABLE or strategy is None:
+        return
+
+    balance = await state.exchange_client.get_balance()
+    usdt_free = _sync_runtime_balances(balance)
+    strategy = _sync_aggressive_scalper_runtime(usdt_free)
+    if usdt_free < 10:
+        logger.warning(f"Insufficient USDT balance: ${usdt_free:.2f} - skipping cycle")
+        return
+
+    symbols = list(strategy.config.metadata.get("symbols", ["BTC/USDT", "ETH/USDT", "SOL/USDT"]))
+    timeframe = str(strategy.config.metadata.get("timeframe", "5m"))
+    snapshots = await _gather_symbol_snapshots(symbols, timeframe)
+    current_prices = {
+        item["symbol"]: float(item["current_price"])
+        for item in snapshots
+        if item is not None
+    }
+    _sync_open_positions_view(current_prices)
+
+    for snapshot in snapshots:
+        if snapshot is None:
+            continue
+
+        symbol = str(snapshot["symbol"])
+        df = snapshot["df"]
+        current_price = float(snapshot["current_price"])
+        atr_value = float(snapshot.get("atr_value", 0.0) or 0.0)
+
+        if symbol == "BTC/USDT":
+            state.current_price = current_price
+
+        strategy_for_symbol = copy.deepcopy(strategy) if _has_open_trade_for_symbol(symbol) else strategy
+        strategy_for_symbol.config.symbol = symbol
+        signal = strategy_for_symbol.generate_signal(df, len(df) - 1, current_price)
+
+        open_trade = next(
+            (
+                (trade_id, managed_trade)
+                for trade_id, managed_trade in state.managed_trades.items()
+                if getattr(managed_trade, "symbol", None) == symbol and not getattr(managed_trade, "closed", False)
+            ),
+            None,
+        )
+        if open_trade is not None:
+            trade_id, managed_trade = open_trade
+            await _manage_trade_for_symbol(
+                trade_id=trade_id,
+                trade=managed_trade,
+                strategy=strategy,
+                current_price=current_price,
+                atr_value=atr_value,
+                opposing_signal=str(signal.action).upper() if signal.action in ("BUY", "SELL") else None,
+            )
+            _sync_open_positions_view(current_prices)
+            if _has_open_trade_for_symbol(symbol):
+                continue
+
+        min_confidence = float(getattr(strategy.config, "min_confidence", 0.55) or 0.55)
+        if signal.action not in ("BUY", "SELL") or signal.confidence < min_confidence:
+            continue
+
+        logger.info(
+            f"SIGNAL: {signal.action} {symbol} @ {current_price:.4f} | "
+            f"qty={float(signal.size or 0.0):.6f} | confidence={signal.confidence:.2f} | "
+            f"SL={(signal.stop_loss or 0.0):.4f} TP={(signal.take_profit or 0.0):.4f}"
+        )
+
+        trade_event = await _open_managed_trade(
+            strategy=strategy,
+            symbol=symbol,
+            signal=signal,
+            current_price=current_price,
+            balance_map=balance,
+        )
+        if trade_event is None:
+            continue
+
+        logger.info("Managed trade opened for %s", symbol)
+        await manager.broadcast({
+            "type": "trade",
+            **trade_event,
+        })
+        balance = await state.exchange_client.get_balance()
+        _sync_runtime_balances(balance)
+        _sync_open_positions_view(current_prices)
+
+    _sync_open_positions_view(current_prices)
+    _refresh_trade_statistics()
+
+
 
 async def real_trading_loop():
     """
@@ -4442,6 +5114,18 @@ async def real_trading_loop():
     LOOP_INTERVAL = 30  # seconds between signal checks
 
     logger.info("Real trading loop starting...")
+
+    while True:
+        try:
+            await _run_real_trading_cycle()
+            await asyncio.sleep(REAL_TRADING_LOOP_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            logger.info("Real trading loop cancelled")
+            break
+        except Exception as loop_error:
+            logger.error(f"Trading loop error: {loop_error}")
+            await asyncio.sleep(60)
+    return
 
     while True:
         try:

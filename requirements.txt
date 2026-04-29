@@ -20,6 +20,12 @@ scikit-learn>=1.4.0
 xgboost>=2.1.0
 lightgbm>=4.5.0
 onnxruntime>=1.18.0
+catboost>=1.2.5
+hmmlearn>=0.3.2
+
+# ==================== SEQUENTIAL MODELS (optional) ====================
+pytorch-forecasting>=1.1.0
+torch>=2.2.0
 
 # ==================== CONFIG & VALIDATION ====================
 pydantic>=2.10.0

@@ -1,0 +1,10 @@
+tier_1:
+  - "BTC/USDT"
+  - "ETH/USDT"
+
+tier_2:
+  - "SOL/USDT"
+  - "BNB/USDT"
+  - "XRP/USDT"
+
+tier_3: []
